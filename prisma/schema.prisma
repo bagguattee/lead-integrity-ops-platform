@@ -1,0 +1,193 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 1. Tenancy & Auth
+model Tenant {
+  id              String            @id @default(cuid())
+  name            String
+  slug            String            @unique
+  localeDefault   String            @default("US") // US | AU
+  webhookSecret   String            @default("whsec_default_secret_key_12345")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  memberships     Membership[]
+  budgetPolicy    BudgetPolicy?
+  auditEvents     AuditEvent[]
+  ingestionRuns   IngestionRun[]
+  leadMasters     LeadMaster[]
+  leadAliases     LeadAlias[]
+  quarantineLogs  QuarantineRecord[]
+  enrichmentLogs  EnrichmentLog[]
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  memberships  Membership[]
+  auditEvents  AuditEvent[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      String   @default("VIEWER") // OWNER | ADMIN | REVIEWER | VIEWER
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+}
+
+model BudgetPolicy {
+  id                 String   @id @default(cuid())
+  tenantId           String   @unique
+  monthlyCapCents    Int      @default(5000) // $50.00
+  currentSpendCents  Int      @default(0)
+  cacheSavingsCents  Int      @default(0)
+  cacheOnlyOnCap     Boolean  @default(true)
+  warningThreshold   Int      @default(80) // 80%
+  updatedAt          DateTime @updatedAt
+
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String?
+  action     String   // e.g. "quarantine:resolve", "budget:update", "run:upload"
+  targetId   String?
+  metadata   String?  // JSON string
+  createdAt  DateTime @default(now())
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// 2. Ingestion & Integrity
+model IngestionRun {
+  id                  String             @id @default(cuid())
+  tenantId            String
+  source              String             @default("CSV_UPLOAD") // CSV_UPLOAD | N8N_WEBHOOK
+  fileName            String?
+  status              String             @default("QUEUED") // QUEUED | PROCESSING | COMPLETED | FAILED
+  locale              String             @default("US") // US | AU
+  totalInbound        Int                @default(0)
+  cleanMastersCount   Int                @default(0)
+  mergedDuplicates    Int                @default(0)
+  quarantinedCount    Int                @default(0)
+  systemFailuresCount Int                @default(0)
+  errorMessage        String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leadMasters         LeadMaster[]
+  leadAliases         LeadAlias[]
+  quarantineRecords   QuarantineRecord[]
+  enrichmentLogs      EnrichmentLog[]
+}
+
+model LeadMaster {
+  id                String             @id @default(cuid())
+  tenantId          String
+  runId             String?
+  canonicalName     String
+  firstName         String?
+  lastName          String?
+  normalizedPhone   String?
+  normalizedEmail   String?
+  rawAddress        String?
+  street            String?
+  city              String?
+  state             String?
+  zip               String?
+  rawPayloadHash    String             @unique // Payload idempotency hash
+  isSharedHub       Boolean            @default(false)
+  isTcpaOptedOut    Boolean            @default(false)
+  triageScore       Int                @default(1) // 1 - 5
+  triageConfidence  Float              @default(1.0) // 0.0 - 1.0
+  intentCategory    String             @default("ROUTINE") // EMERGENCY_STORM | HIGH_INTENT | ROUTINE | UNCERTAIN
+  estimatedValue    Float              @default(0)
+  status            String             @default("CLEAN_MASTER") // CLEAN_MASTER | SYNCED_TO_GHL | QUARANTINED | DORMANT
+  lastInteractionAt DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run               IngestionRun?      @relation(fields: [runId], references: [id], onDelete: SetNull)
+  aliases           LeadAlias[]
+  quarantineRecords QuarantineRecord[]
+}
+
+model LeadAlias {
+  id           String        @id @default(cuid())
+  tenantId     String
+  masterId     String
+  runId        String?
+  rawName      String
+  rawPhone     String?
+  rawEmail     String?
+  rawAddress   String?
+  rawPayload   String        // Original JSON string
+  matchTier    String        // TIER_1_EXACT | TIER_2_FUZZY | SHARED_HOUSEHOLD
+  payloadHash  String
+  createdAt    DateTime      @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  master       LeadMaster    @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  run          IngestionRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
+
+model QuarantineRecord {
+  id                  String        @id @default(cuid())
+  tenantId            String
+  runId               String?
+  masterId            String?
+  reason              String        // INVALID_SHAPE | DNC_CLUSTER | SHARED_HUB | LOW_CONFIDENCE_HITL | TIME_GAP_REVIEW
+  contaminatingRecord String?       // Offending phone, DNC source ID or payload summary
+  rawPayload          String
+  resolved            Boolean       @default(false)
+  resolutionAction    String?       // APPROVED_SYNC | SPLIT_MASTER | EDITED_FIELDS | PERMANENT_QUARANTINE
+  resolvedByUserId    String?
+  resolutionNotes     String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run                 IngestionRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  master              LeadMaster?   @relation(fields: [masterId], references: [id], onDelete: SetNull)
+}
+
+// 3. Operations & FinOps Telemetry
+model EnrichmentLog {
+  id               String        @id @default(cuid())
+  tenantId         String
+  runId            String?
+  leadIdentifier   String        // Phone or Email
+  provider         String        // LOCAL_CACHE | PRIMARY_MOCK_API | FALLBACK_MOCK_API | LLM_GROQ
+  cacheHit         Boolean       @default(false)
+  costCents        Int           @default(0) // 0 for local cache, 5 for primary, 12 for fallback
+  inputTokens      Int           @default(0)
+  outputTokens     Int           @default(0)
+  latencyMs        Int           @default(0)
+  status           String        @default("SUCCESS") // SUCCESS | BUDGET_CAPPED | FAILED
+  createdAt        DateTime      @default(now())
+
+  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run              IngestionRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
