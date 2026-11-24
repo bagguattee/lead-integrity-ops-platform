@@ -8,25 +8,46 @@ export async function getCurrentSession(): Promise<SessionData> {
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
 
   if (!session.isLoggedIn) {
-    // If not logged in, auto-login as Demo Admin for immediate 1-click preview
-    const defaultTenant = await prisma.tenant.findUnique({
-      where: { slug: "apex-roofing" },
-    });
-    const defaultUser = await prisma.user.findUnique({
-      where: { email: "admin@apexroofing.com" },
-    });
+    try {
+      // If not logged in, auto-login as Demo Admin for immediate 1-click preview
+      const defaultTenant = await prisma.tenant.findUnique({
+        where: { slug: "apex-roofing" },
+      });
+      const defaultUser = await prisma.user.findUnique({
+        where: { email: "admin@apexroofing.com" },
+      });
 
-    if (defaultTenant && defaultUser) {
-      session.userId = defaultUser.id;
-      session.userEmail = defaultUser.email;
-      session.userName = defaultUser.name;
-      session.tenantId = defaultTenant.id;
-      session.tenantName = defaultTenant.name;
-      session.role = "ADMIN";
-      session.isLoggedIn = true;
-      await session.save();
-    } else {
-      return defaultSession;
+      if (defaultTenant && defaultUser) {
+        session.userId = defaultUser.id;
+        session.userEmail = defaultUser.email;
+        session.userName = defaultUser.name;
+        session.tenantId = defaultTenant.id;
+        session.tenantName = defaultTenant.name;
+        session.role = "ADMIN";
+        session.isLoggedIn = true;
+        await session.save();
+      } else {
+        return {
+          userId: "demo_admin_fallback",
+          userEmail: "admin@apexroofing.com",
+          userName: "Marcus Vance (Ops Lead)",
+          tenantId: "demo_tenant_apex",
+          tenantName: "Apex Roofing TX",
+          role: "ADMIN",
+          isLoggedIn: true,
+        };
+      }
+    } catch (e) {
+      // Database not ready yet, provide instant demo session
+      return {
+        userId: "demo_admin_fallback",
+        userEmail: "admin@apexroofing.com",
+        userName: "Marcus Vance (Ops Lead)",
+        tenantId: "demo_tenant_apex",
+        tenantName: "Apex Roofing TX",
+        role: "ADMIN",
+        isLoggedIn: true,
+      };
     }
   }
 
