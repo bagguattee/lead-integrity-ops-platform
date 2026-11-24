@@ -262,13 +262,13 @@ export function serviceLabel(locale: SupportedLocale): string {
 export function defaultVoiceConfig(tenantName: string, locale: SupportedLocale): VoiceAgentConfig {
   const transfer = locale === "AU" ? "+61 2 5550 0142" : locale === "UK" ? "+44 20 7946 0142" : "+1 512 555 0142";
   return {
-    agentName: "Riley",
+    agentName: "Ash",
     provider: "MOCK",
-    voiceLabel: "ElevenLabs • warm-female (configurable voice id)",
-    model: "gpt-4o-mini (configurable)",
+    voiceLabel: "Vapi • Elliot",
+    model: "gpt-4.1",
     firstMessage: `Hi {{first_name}}, this is {{agent_name}}, an AI assistant calling from ${tenantName} about the ${SERVICE_BY_LOCALE[locale]} you asked about. Do you have a quick minute?`,
     systemPrompt: [
-      `You are {{agent_name}}, a voice assistant for ${tenantName}.`,
+      `You are {{agent_name}}, an AI voice qualification representative for ${tenantName}.`,
       "GOAL: qualify the lead and book a free on-site appointment. Never quote prices.",
       "COMPLIANCE: disclose you are an AI and that the call may be recorded. If the person says stop calling / remove me / do not call, call the tool flag_do_not_call IMMEDIATELY, apologise once, and end the call.",
       "TOOLS: check_availability → offer two slots → book_appointment. Use transfer_to_human for billing disputes, legal threats, or an angry caller.",
