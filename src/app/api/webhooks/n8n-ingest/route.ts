@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { processPipelineBatch } from "@/lib/pipeline-engine";
 import { WebhookInboundPayloadSchema } from "@/contracts/lead-contracts";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Live Inbound n8n Webhook Endpoint:
  * Consumes lead batches with HMAC-SHA256 signature verification.
