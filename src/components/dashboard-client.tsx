@@ -205,23 +205,23 @@ export function DashboardClient({
     <>
       <div className="flex flex-col lg:flex-row min-h-screen">
         {/* MIDDLE RAIL: Client Sub-Accounts (Matches "Choose method" column in reference) */}
-        <section className="w-full lg:w-[304px] xl:w-[324px] flex-shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-[#E8EEF6] p-6 flex flex-col justify-between">
+        <section className="w-full lg:w-[304px] xl:w-[324px] flex-shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-[#E8EEF6] p-6 flex flex-col justify-start gap-6">
           <div>
             {/* Rail Header */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-5">
               <h2 className="text-[15px] font-bold text-[#172554]">Sub-accounts</h2>
               <button
                 type="button"
                 onClick={() => setIntakeOpen(true)}
                 data-testid="rail-add-lead-btn"
-                className="px-3.5 py-2 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-[#2CE0B6] to-[#1EC8B8] hover:opacity-95 shadow-[0_6px_16px_rgba(30,200,184,0.3)] flex items-center gap-1 transition"
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-[#2CE0B6] to-[#1EC8B8] hover:opacity-95 shadow-[0_4px_12px_rgba(30,200,184,0.25)] flex items-center gap-1 transition"
               >
                 <Plus className="w-3.5 h-3.5 stroke-[2.5]" /> Add Lead
               </button>
             </div>
 
             {/* 3 Stacked Agency Client Sub-Account Cards */}
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               {workspaces.map((ws) => {
                 const isActive = ws.slug === tenant.slug;
                 const isSwitchingThis = switchingSlug === ws.slug;
@@ -230,15 +230,15 @@ export function DashboardClient({
                   <div
                     key={ws.slug}
                     data-testid={`workspace-card-${ws.slug}`}
-                    className={`p-5 ${isActive ? "soax-method-card-active" : "soax-method-card"}`}
+                    className={`p-4.5 pl-5 pr-5 ${isActive ? "soax-method-card-active" : "soax-method-card"}`}
                   >
                     {/* Card Top Row */}
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-3">
                       <span className="text-[13px] font-bold text-[#172554] truncate pr-2">
                         {ws.name}
                       </span>
                       <span
-                        className={`text-[9px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                        className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
                           ws.statusBadge === "ACTIVE"
                             ? "bg-[#1E5EFF] text-white"
                             : "bg-[#516F9E] text-white"
@@ -249,9 +249,9 @@ export function DashboardClient({
                     </div>
 
                     {/* Center Emblem */}
-                    <div className="py-2 text-center">
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#F6F9FE] border border-[#E8EFF8]">
-                        <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-[#1649C7] to-[#2CE0B6] text-white text-[10px] font-extrabold flex items-center justify-center">
+                    <div className="py-1 text-center">
+                      <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-xl bg-[#F6F9FE] border border-[#E8EFF8]">
+                        <span className="w-5 h-5 rounded-md bg-gradient-to-br from-[#1649C7] to-[#2CE0B6] text-white text-[9px] font-extrabold flex items-center justify-center">
                           {ws.localeDefault}
                         </span>
                         <div className="text-left">
@@ -263,7 +263,7 @@ export function DashboardClient({
                           </p>
                         </div>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-2 truncate">{ws.subtitle}</p>
+                      <p className="text-[11px] text-slate-400 mt-1.5 truncate">{ws.subtitle}</p>
                     </div>
 
                     {/* Card Action Button */}
@@ -272,9 +272,9 @@ export function DashboardClient({
                       onClick={() => handleSelectWorkspace(ws.slug)}
                       disabled={isActive || Boolean(switchingSlug)}
                       data-testid={`switch-btn-${ws.slug}`}
-                      className={`w-full mt-3 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                      className={`w-full mt-2.5 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                         isActive
-                          ? "bg-[#1649C7] text-white shadow-[0_6px_16px_rgba(22,73,199,0.24)] cursor-default"
+                          ? "bg-[#1649C7] text-white shadow-[0_4px_12px_rgba(22,73,199,0.2)] cursor-default"
                           : "bg-[#F1F5FB] text-[#1E3A8A] hover:bg-[#1649C7] hover:text-white"
                       }`}
                     >
@@ -290,9 +290,9 @@ export function DashboardClient({
                     </button>
 
                     {/* Card Footer Stats */}
-                    <div className="mt-4 pt-3 border-t border-[#F1F5FB] flex items-center justify-between text-[10px]">
+                    <div className="mt-3 pt-2.5 border-t border-[#F1F5FB] flex items-center justify-between text-[10px]">
                       <div>
-                        <span className="uppercase tracking-wider text-slate-400 font-semibold mr-1.5">
+                        <span className="uppercase tracking-wider text-slate-400 font-semibold mr-1">
                           INBOUND
                         </span>
                         <strong className="text-xs font-extrabold text-[#172554]">
@@ -300,7 +300,7 @@ export function DashboardClient({
                         </strong>
                       </div>
                       <div>
-                        <span className="uppercase tracking-wider text-slate-400 font-semibold mr-1.5">
+                        <span className="uppercase tracking-wider text-slate-400 font-semibold mr-1">
                           PIPELINE
                         </span>
                         <strong className="text-xs font-extrabold text-[#172554]">
@@ -314,11 +314,24 @@ export function DashboardClient({
             </div>
           </div>
 
-          {/* Bottom Mint Action Bar (Matches "Show more" in reference) */}
-          <div className="pt-5">
+          {/* Quick Lineage Context Card & Action */}
+          <div className="space-y-3 pt-2 border-t border-[#E8EEF6]">
+            <div className="p-3.5 bg-[#F8FAFC] rounded-xl border border-[#EDF2F7] text-xs space-y-1.5">
+              <div className="font-bold text-[#172554] flex items-center justify-between">
+                <span>Ingestion Lineage</span>
+                <span className="text-[10px] font-mono text-[#0E9F84] bg-[#E3FAF4] px-1.5 py-0.5 rounded">
+                  CSV + Webhook
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Raw payloads stream into deterministic dedupe tiers before syncing to GoHighLevel.
+              </p>
+            </div>
+
             <Link
               href="/runs"
-              className="block w-full py-2.5 rounded-lg bg-[#E3FAF4] hover:bg-[#CCF5EA] text-[#0E9F84] text-xs font-bold text-center transition"
+              data-testid="upload-batch-csv-btn"
+              className="block w-full py-2.5 rounded-lg bg-[#E3FAF4] hover:bg-[#CCF5EA] text-[#0E9F84] text-xs font-bold text-center transition shadow-xs"
             >
               Upload Batch CSV →
             </Link>
@@ -453,9 +466,9 @@ export function DashboardClient({
             </div>
 
             {/* Charts Row: Daily Capsule Bar Chart + FinOps Donut Gauge */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
               {/* Left Card: Daily ingestion overview (Matches "Daily balance overview") */}
-              <div className="xl:col-span-8 soax-card p-6 flex flex-col justify-between">
+              <div className="lg:col-span-7 xl:col-span-8 soax-card p-6 flex flex-col justify-between">
                 <div className="flex items-center justify-between gap-2 mb-5">
                   <div className="flex items-center gap-3.5 flex-wrap">
                     <h3 className="text-[14px] font-bold text-[#172554] whitespace-nowrap">
@@ -583,16 +596,16 @@ export function DashboardClient({
               </div>
 
               {/* Right Card: FinOps Donut Gauge (Matches "Balance statistic" card) */}
-              <div className="xl:col-span-4 soax-card p-6 flex flex-col justify-between">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-[14px] font-bold text-[#172554] whitespace-nowrap">
+              <div className="lg:col-span-5 xl:col-span-4 soax-card p-6 flex flex-col justify-between min-w-0 overflow-hidden">
+                <div className="flex items-center justify-between gap-1 flex-nowrap w-full pb-1">
+                  <h3 className="text-[14px] font-bold text-[#172554] truncate">
                     FinOps balance
                   </h3>
-                  <div className="flex items-center gap-2.5 text-[11px] font-bold flex-shrink-0">
+                  <div className="flex items-center gap-2 text-[11px] font-bold flex-shrink-0">
                     <button
                       type="button"
                       onClick={() => setDonutMode("SPEND")}
-                      className={`pb-1 transition ${
+                      className={`pb-0.5 px-0.5 transition ${
                         donutMode === "SPEND"
                           ? "text-[#172554] border-b-2 border-[#36DFC0]"
                           : "text-slate-400 hover:text-slate-600"
@@ -603,7 +616,7 @@ export function DashboardClient({
                     <button
                       type="button"
                       onClick={() => setDonutMode("SAVED")}
-                      className={`pb-1 transition ${
+                      className={`pb-0.5 px-0.5 transition ${
                         donutMode === "SAVED"
                           ? "text-[#172554] border-b-2 border-[#36DFC0]"
                           : "text-slate-400 hover:text-slate-600"
@@ -615,65 +628,67 @@ export function DashboardClient({
                 </div>
 
                 {/* Donut Ring */}
-                <div className="my-3 flex items-center justify-center relative">
-                  <svg className="w-[176px] h-[176px] -rotate-90" viewBox="0 0 176 176">
-                    {/* Outer subtle halo */}
-                    <circle
-                      cx="88"
-                      cy="88"
-                      r="76"
-                      fill="none"
-                      stroke="#F1F5FB"
-                      strokeWidth="6"
-                    />
-                    {/* Base Track */}
-                    <circle
-                      cx="88"
-                      cy="88"
-                      r={radius}
-                      fill="none"
-                      stroke="#E6ECF5"
-                      strokeWidth="18"
-                    />
-                    {/* Aqua-Mint Segment (API Spend) */}
-                    <circle
-                      cx="88"
-                      cy="88"
-                      r={radius}
-                      fill="none"
-                      stroke="#36DFC0"
-                      strokeWidth="18"
-                      strokeDasharray={`${spendDash} ${circumference}`}
-                    />
-                    {/* Royal-Blue Segment (Cache Savings) */}
-                    <circle
-                      cx="88"
-                      cy="88"
-                      r={radius}
-                      fill="none"
-                      stroke="#1956DB"
-                      strokeWidth="18"
-                      strokeDasharray={`${savedDash} ${circumference}`}
-                      strokeDashoffset={-(spendDash + 4)}
-                    />
-                  </svg>
+                <div className="my-3 flex items-center justify-center relative w-full overflow-hidden">
+                  <div className="w-[176px] h-[176px] flex items-center justify-center relative flex-shrink-0">
+                    <svg className="w-[176px] h-[176px] -rotate-90 block" viewBox="0 0 176 176">
+                      {/* Outer subtle halo */}
+                      <circle
+                        cx="88"
+                        cy="88"
+                        r="76"
+                        fill="none"
+                        stroke="#F1F5FB"
+                        strokeWidth="6"
+                      />
+                      {/* Base Track */}
+                      <circle
+                        cx="88"
+                        cy="88"
+                        r={radius}
+                        fill="none"
+                        stroke="#E6ECF5"
+                        strokeWidth="18"
+                      />
+                      {/* Aqua-Mint Segment (API Spend) */}
+                      <circle
+                        cx="88"
+                        cy="88"
+                        r={radius}
+                        fill="none"
+                        stroke="#36DFC0"
+                        strokeWidth="18"
+                        strokeDasharray={`${spendDash} ${circumference}`}
+                      />
+                      {/* Royal-Blue Segment (Cache Savings) */}
+                      <circle
+                        cx="88"
+                        cy="88"
+                        r={radius}
+                        fill="none"
+                        stroke="#1956DB"
+                        strokeWidth="18"
+                        strokeDasharray={`${savedDash} ${circumference}`}
+                        strokeDashoffset={-(spendDash + 4)}
+                      />
+                    </svg>
 
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className="text-[28px] font-extrabold text-[#172554] tracking-tight leading-none">
-                      ${donutMode === "SPEND" ? spendDollars : savedDollars}
-                    </span>
-                    <span className="text-[11px] font-medium text-slate-400 mt-1">
-                      {donutMode === "SPEND" ? `of $${capDollars} Cap` : "Cache Saved"}
-                    </span>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                      <span className="text-[26px] font-extrabold text-[#172554] tracking-tight leading-none px-2">
+                        ${donutMode === "SPEND" ? spendDollars : savedDollars}
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-400 mt-1">
+                        {donutMode === "SPEND" ? `of $${capDollars} Cap` : "Cache Saved"}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-center gap-5 text-xs text-slate-500 font-medium">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[#36DFC0]" /> API Spend
+                <div className="flex items-center justify-center gap-5 text-xs text-slate-500 font-medium pt-1">
+                  <span className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-[#36DFC0] flex-shrink-0" /> API Spend
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[#1956DB]" /> Cache Saved
+                  <span className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-[#1956DB] flex-shrink-0" /> Cache Saved
                   </span>
                 </div>
               </div>
