@@ -1,10 +1,10 @@
 import { getCurrentSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import Link from "next/link";
-import { Layers, UploadCloud, Terminal, CheckCircle2, Clock } from "lucide-react";
+import { Layers, CheckCircle2, ArrowUpRight, Terminal, Globe2 } from "lucide-react";
 
 export default async function RunsPage() {
   const session = await getCurrentSession();
+  const isSolarAU = session.tenantName.includes("Solar") || session.tenantId.includes("summit");
 
   let runs: any[] = [];
   try {
@@ -13,7 +13,36 @@ export default async function RunsPage() {
       orderBy: { createdAt: "desc" },
     });
   } catch (e) {
-    runs = [
+    // Database fallback
+  }
+
+  if (runs.length === 0) {
+    runs = isSolarAU ? [
+      {
+        id: "run_au_batch_901",
+        fileName: "Sydney_Commercial_Solar_Q4.csv",
+        source: "CSV_UPLOAD",
+        status: "COMPLETED",
+        locale: "AU",
+        totalInbound: 11,
+        cleanMastersCount: 8,
+        mergedDuplicates: 2,
+        quarantinedCount: 1,
+        createdAt: new Date(),
+      },
+      {
+        id: "run_au_webhook_902",
+        fileName: "GHL_Sydney_Inbound_Stream",
+        source: "N8N_WEBHOOK",
+        status: "COMPLETED",
+        locale: "AU",
+        totalInbound: 1,
+        cleanMastersCount: 1,
+        mergedDuplicates: 0,
+        quarantinedCount: 0,
+        createdAt: new Date(),
+      },
+    ] : [
       {
         id: "run_apex_batch_01",
         fileName: "Apex_Leads_Batch_Nov24.csv",
@@ -26,55 +55,71 @@ export default async function RunsPage() {
         quarantinedCount: 2,
         createdAt: new Date(),
       },
+      {
+        id: "run_apex_webhook_02",
+        fileName: "GHL_Austin_Webhook_Stream",
+        source: "N8N_WEBHOOK",
+        status: "COMPLETED",
+        locale: "US",
+        totalInbound: 3,
+        cleanMastersCount: 2,
+        mergedDuplicates: 1,
+        quarantinedCount: 0,
+        createdAt: new Date(),
+      },
     ];
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 animate-in fade-in duration-200">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+            <Layers className="w-6 h-6 text-emerald-400" />
             Ingestion Runs & Webhook Inspector
-          </h2>
+          </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Trace incoming batches from CSV uploads and n8n webhook webhooks down to individual row-level lineage.
+            Complete lineage audit of all CSV batch uploads and live n8n webhook payloads ingested into this workspace.
           </p>
         </div>
       </div>
 
       {/* Runs Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-        <table className="w-full text-left text-sm text-slate-300">
-          <thead className="bg-slate-950/80 text-xs uppercase font-mono text-slate-400 border-b border-slate-800">
+      <div className="rounded-xl border border-white/5 bg-[#0b0f19] overflow-hidden shadow-xl">
+        <table className="w-full text-left text-xs text-slate-300">
+          <thead className="bg-[#080d18] text-[10px] uppercase font-mono text-slate-400 border-b border-white/5">
             <tr>
-              <th className="px-6 py-3.5">Run ID & Source</th>
-              <th className="px-6 py-3.5">Status</th>
-              <th className="px-6 py-3.5">Locale</th>
-              <th className="px-6 py-3.5 text-center">Inbound</th>
-              <th className="px-6 py-3.5 text-center">Clean</th>
-              <th className="px-6 py-3.5 text-center">Merged</th>
-              <th className="px-6 py-3.5 text-center">Quarantined</th>
-              <th className="px-6 py-3.5 text-right">Timestamp</th>
+              <th className="px-5 py-3.5">Run Identifier & Source</th>
+              <th className="px-5 py-3.5">Execution Status</th>
+              <th className="px-5 py-3.5">Locale Standard</th>
+              <th className="px-5 py-3.5 text-center font-bold">Total Inbound</th>
+              <th className="px-5 py-3.5 text-center text-emerald-400 font-bold">Clean Masters</th>
+              <th className="px-5 py-3.5 text-center text-blue-400 font-bold">Merged Dups</th>
+              <th className="px-5 py-3.5 text-center text-amber-400 font-bold">Quarantined</th>
+              <th className="px-5 py-3.5 text-right font-mono">Timestamp</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-white/5">
             {runs.map((r) => (
-              <tr key={r.id} className="hover:bg-slate-800/40 transition">
-                <td className="px-6 py-4 font-mono text-xs">
-                  <span className="font-semibold text-white block">{r.fileName || "Webhook Stream"}</span>
-                  <span className="text-[10px] text-slate-500">{r.id}</span>
+              <tr key={r.id} className="hover:bg-white/[0.02] transition">
+                <td className="px-5 py-4 font-mono text-xs">
+                  <span className="font-semibold text-slate-200 block">{r.fileName || "Webhook Stream"}</span>
+                  <span className="text-[10px] text-slate-500 font-mono">{r.id}</span>
                 </td>
-                <td className="px-6 py-4">
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
+                <td className="px-5 py-4">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
                     {r.status}
                   </span>
                 </td>
-                <td className="px-6 py-4 font-mono text-xs text-slate-400">{r.locale}</td>
-                <td className="px-6 py-4 text-center font-bold text-white">{r.totalInbound}</td>
-                <td className="px-6 py-4 text-center font-bold text-emerald-400">{r.cleanMastersCount}</td>
-                <td className="px-6 py-4 text-center font-bold text-blue-400">{r.mergedDuplicates}</td>
-                <td className="px-6 py-4 text-center font-bold text-amber-400">{r.quarantinedCount}</td>
-                <td className="px-6 py-4 text-right font-mono text-xs text-slate-400">
+                <td className="px-5 py-4 font-mono text-xs text-slate-400 flex items-center gap-1.5 pt-5">
+                  <Globe2 className="w-3.5 h-3.5 text-slate-500" />
+                  <span>{r.locale === "AU" ? "AU (E.164 +61)" : "US (E.164 +1)"}</span>
+                </td>
+                <td className="px-5 py-4 text-center font-bold text-white font-mono text-sm">{r.totalInbound}</td>
+                <td className="px-5 py-4 text-center font-bold text-emerald-400 font-mono text-sm">{r.cleanMastersCount}</td>
+                <td className="px-5 py-4 text-center font-bold text-blue-400 font-mono text-sm">{r.mergedDuplicates}</td>
+                <td className="px-5 py-4 text-center font-bold text-amber-400 font-mono text-sm">{r.quarantinedCount}</td>
+                <td className="px-5 py-4 text-right font-mono text-[11px] text-slate-400">
                   {new Date(r.createdAt).toLocaleDateString()} {new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </td>
               </tr>
