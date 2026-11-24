@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { RawInboundLead, NormalizedLead } from "../contracts/lead-contracts";
+import { RawInboundLead, NormalizedLead, SupportedLocale } from "../contracts/lead-contracts";
 
 const INVALID_TOKENS = new Set([
   "idk",
@@ -13,6 +13,9 @@ const INVALID_TOKENS = new Set([
   "asdf",
   "no phone",
   "fake",
+  "tbd",
+  "-",
+  "--",
   "0000000000",
   "1234567890",
   "noemail@email.com",
@@ -31,19 +34,21 @@ export function sanitizeString(val: unknown): string | null {
 }
 
 /**
- * Formats phone number into standard E.164 (+1... for US, +61... for AU).
+ * Formats phone number into standard E.164:
+ * - US: +1XXXXXXXXXX
+ * - AU: +61XXXXXXXXX
+ * - UK: +44XXXXXXXXXX
  */
-export function normalizePhone(rawPhone: unknown, locale: "US" | "AU" = "US"): string | null {
+export function normalizePhone(rawPhone: unknown, locale: SupportedLocale = "US"): string | null {
   const sanitized = sanitizeString(rawPhone);
   if (!sanitized) return null;
 
-  // Strip all non-digits
   const digits = sanitized.replace(/\D/g, "");
+  if (!digits || /^(\d)\1{8,}$/.test(digits)) return null; // Reject repeated digits like 9999999999
 
   if (locale === "US") {
-    // US numbers: 10 digits or 11 digits starting with 1
     if (digits.length === 10) {
-      if (digits.startsWith("0") || digits.startsWith("1")) return null; // Invalid area codes
+      if (digits.startsWith("0") || digits.startsWith("1")) return null;
       return `+1${digits}`;
     }
     if (digits.length === 11 && digits.startsWith("1")) {
@@ -55,15 +60,29 @@ export function normalizePhone(rawPhone: unknown, locale: "US" | "AU" = "US"): s
   }
 
   if (locale === "AU") {
-    // Australian numbers: e.g. 0412345678 -> +61412345678, or 61412345678
+    // Australian landline/mobile: 0412 345 678 -> +61412345678, or 61412345678 -> +61412345678
     if (digits.startsWith("0") && digits.length === 10) {
       return `+61${digits.slice(1)}`;
     }
     if (digits.startsWith("61") && digits.length === 11) {
       return `+${digits}`;
     }
-    if (digits.length === 9) {
+    if (digits.length === 9 && /^[23478]/.test(digits)) {
       return `+61${digits}`;
+    }
+    return null;
+  }
+
+  if (locale === "UK") {
+    // UK mobile/landline: 07700 900123 (11 digits) -> +447700900123, or 447700900123 (12 digits)
+    if (digits.startsWith("0") && (digits.length === 10 || digits.length === 11)) {
+      return `+44${digits.slice(1)}`;
+    }
+    if (digits.startsWith("44") && (digits.length === 11 || digits.length === 12)) {
+      return `+${digits}`;
+    }
+    if (digits.length === 10 && digits.startsWith("7")) {
+      return `+44${digits}`;
     }
     return null;
   }
@@ -72,50 +91,45 @@ export function normalizePhone(rawPhone: unknown, locale: "US" | "AU" = "US"): s
 }
 
 /**
- * Validates and normalizes email strings, stripping dirty trailing periods or typo characters.
+ * Validates and normalizes email strings, stripping dirty trailing punctuation and fixing common domain typos.
  */
 export function normalizeEmail(rawEmail: unknown): string | null {
   const sanitized = sanitizeString(rawEmail);
   if (!sanitized) return null;
 
-  const trimmed = sanitized.toLowerCase().replace(/^[<"']+|[>"',.]+$/g, "");
-  // Stricter email regex
+  const trimmed = sanitized.toLowerCase().replace(/^[<"'\s]+|[>"',.\s]+$/g, "");
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   if (!emailRegex.test(trimmed)) return null;
 
-  // Domain typo corrections
-  let corrected = trimmed;
-  corrected = corrected.replace("@gmai.com", "@gmail.com");
-  corrected = corrected.replace("@gmial.com", "@gmail.com");
-  corrected = corrected.replace("@yaho.com", "@yahoo.com");
-  corrected = corrected.replace("@hotmial.com", "@hotmail.com");
-
-  return corrected;
+  return trimmed
+    .replace(/@gmai\.com$/, "@gmail.com")
+    .replace(/@gmial\.com$/, "@gmail.com")
+    .replace(/@yaho\.com$/, "@yahoo.com")
+    .replace(/@hotmial\.com$/, "@hotmail.com")
+    .replace(/@outlok\.com$/, "@outlook.com");
 }
 
 /**
- * Parses US or AU formatted dates safely.
+ * Parses US (MM/DD/YYYY) vs AU/UK (DD/MM/YYYY) formatted dates deterministically.
  */
-export function parseLocaleDate(rawDate: unknown, locale: "US" | "AU" = "US"): Date | null {
+export function parseLocaleDate(rawDate: unknown, locale: SupportedLocale = "US"): Date | null {
   const sanitized = sanitizeString(rawDate);
   if (!sanitized) return null;
 
-  // Check DD/MM/YYYY vs MM/DD/YYYY
   const slashMatch = sanitized.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
   if (slashMatch) {
     const p1 = parseInt(slashMatch[1], 10);
     const p2 = parseInt(slashMatch[2], 10);
     const year = parseInt(slashMatch[3], 10);
 
-    if (locale === "AU") {
-      // Day is p1, Month is p2
-      const d = new Date(Date.UTC(year, p2 - 1, p1));
-      if (!isNaN(d.getTime())) return d;
-    } else {
-      // US: Month is p1, Day is p2
-      const d = new Date(Date.UTC(year, p1 - 1, p2));
-      if (!isNaN(d.getTime())) return d;
+    const day = locale === "US" ? p2 : p1;
+    const month = locale === "US" ? p1 : p2;
+
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const d = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+      if (!isNaN(d.getTime()) && d.getUTCMonth() === month - 1) return d;
     }
+    return null;
   }
 
   const standard = new Date(sanitized);
@@ -123,12 +137,11 @@ export function parseLocaleDate(rawDate: unknown, locale: "US" | "AU" = "US"): D
 }
 
 /**
- * Computes deterministic SHA-256 payload hash for idempotency and duplicate checking.
+ * Computes deterministic order-independent SHA-256 payload hash for idempotency.
  */
-export function computePayloadHash(raw: Record<string, any>): string {
-  // Sort keys deterministically
+export function computePayloadHash(raw: Record<string, unknown>): string {
   const sortedKeys = Object.keys(raw).sort();
-  const sortedObj: Record<string, any> = {};
+  const sortedObj: Record<string, unknown> = {};
   for (const k of sortedKeys) {
     const v = raw[k];
     if (v !== undefined && v !== null && v !== "") {
@@ -139,12 +152,13 @@ export function computePayloadHash(raw: Record<string, any>): string {
 }
 
 /**
- * Master Lead Normalizer: converts dirty input lead into normalized representation.
+ * Master Lead Normalizer: converts dirty input lead into canonical representation.
  */
-export function normalizeLead(raw: RawInboundLead, locale: "US" | "AU" = "US"): NormalizedLead {
+export function normalizeLead(raw: RawInboundLead, locale: SupportedLocale = "US"): NormalizedLead {
+  const effectiveLocale = raw.locale || locale;
   const rawPhone = raw.phone || raw.phone_number;
   const rawEmail = raw.email;
-  const normalizedPhone = normalizePhone(rawPhone, locale);
+  const normalizedPhone = normalizePhone(rawPhone, effectiveLocale);
   const normalizedEmail = normalizeEmail(rawEmail);
 
   let firstName = sanitizeString(raw.first_name);
@@ -166,24 +180,34 @@ export function normalizeLead(raw: RawInboundLead, locale: "US" | "AU" = "US"): 
   const zip = sanitizeString(raw.zip);
 
   let estimatedValue = 0;
-  if (raw.estimated_value) {
-    const num = typeof raw.estimated_value === "number" 
-      ? raw.estimated_value 
-      : parseFloat(String(raw.estimated_value).replace(/[^0-9.]/g, ""));
+  if (raw.estimated_value !== undefined && raw.estimated_value !== null) {
+    const num =
+      typeof raw.estimated_value === "number"
+        ? raw.estimated_value
+        : parseFloat(String(raw.estimated_value).replace(/[^0-9.]/g, ""));
     if (!isNaN(num)) estimatedValue = num;
   }
 
-  // TCPA opt-out check
   let isTcpaOptedOut = false;
-  if (raw.is_dnc === true || String(raw.is_dnc).toLowerCase() === "true" || String(raw.is_dnc) === "1") {
+  if (
+    raw.is_dnc === true ||
+    String(raw.is_dnc).toLowerCase() === "true" ||
+    String(raw.is_dnc).toLowerCase() === "yes" ||
+    String(raw.is_dnc) === "1"
+  ) {
     isTcpaOptedOut = true;
   }
-  if (raw.tcpa_consent === false || String(raw.tcpa_consent).toLowerCase() === "false" || String(raw.tcpa_consent) === "0") {
+  if (
+    raw.tcpa_consent === false ||
+    String(raw.tcpa_consent).toLowerCase() === "false" ||
+    String(raw.tcpa_consent).toLowerCase() === "no" ||
+    String(raw.tcpa_consent) === "0"
+  ) {
     isTcpaOptedOut = true;
   }
 
-  const payloadHash = computePayloadHash(raw as Record<string, any>);
-  const dateParsed = parseLocaleDate(raw.created_at, locale);
+  const payloadHash = computePayloadHash(raw as Record<string, unknown>);
+  const dateParsed = parseLocaleDate(raw.created_at, effectiveLocale);
 
   return {
     canonicalName,

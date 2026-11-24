@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+export const SupportedLocaleEnum = z.enum(["US", "AU", "UK"]);
+export type SupportedLocale = z.infer<typeof SupportedLocaleEnum>;
+
+export const RoleEnum = z.enum(["OWNER", "ADMIN", "REVIEWER", "VIEWER"]);
+export type UserRole = z.infer<typeof RoleEnum>;
+
 // 1. Raw Inbound Webhook & CSV Row Contract
 export const RawInboundLeadSchema = z.object({
   id: z.string().optional(),
@@ -16,11 +22,12 @@ export const RawInboundLeadSchema = z.object({
   zip: z.string().optional(),
   notes: z.string().optional(),
   job_type: z.string().optional(),
+  source_channel: z.string().optional(),
   estimated_value: z.union([z.string(), z.number()]).optional(),
   is_dnc: z.union([z.boolean(), z.string()]).optional(),
   tcpa_consent: z.union([z.boolean(), z.string()]).optional(),
   created_at: z.string().optional(),
-  locale: z.enum(["US", "AU"]).default("US"),
+  locale: SupportedLocaleEnum.optional(),
 });
 
 export type RawInboundLead = z.infer<typeof RawInboundLeadSchema>;
@@ -30,7 +37,7 @@ export const NormalizedLeadSchema = z.object({
   canonicalName: z.string(),
   firstName: z.string().nullable(),
   lastName: z.string().nullable(),
-  normalizedPhone: z.string().nullable(), // E.164: +1XXXXXXXXXX or +61XXXXXXXXX
+  normalizedPhone: z.string().nullable(), // E.164: +1..., +61..., +44...
   normalizedEmail: z.string().nullable(),
   rawAddress: z.string().nullable(),
   street: z.string().nullable(),
@@ -65,7 +72,7 @@ export type QuarantineReason = z.infer<typeof QuarantineReasonEnum>;
 export const WebhookInboundPayloadSchema = z.object({
   leads: z.array(z.record(z.any())).min(1),
   source: z.enum(["CSV_UPLOAD", "N8N_WEBHOOK"]).default("N8N_WEBHOOK"),
-  locale: z.enum(["US", "AU"]).default("US"),
+  locale: SupportedLocaleEnum.default("US"),
 });
 
 export const WebhookResponseSchema = z.object({
@@ -101,11 +108,13 @@ export const GhlDispatchPayloadSchema = z.object({
     tags: z.array(z.string()),
     customFields: z.record(z.any()),
   }),
-  opportunity: z.object({
-    title: z.string(),
-    stage: z.string(),
-    monetaryValue: z.number(),
-  }).optional(),
+  opportunity: z
+    .object({
+      title: z.string(),
+      stage: z.string(),
+      monetaryValue: z.number(),
+    })
+    .optional(),
 });
 
 export type GhlDispatchPayload = z.infer<typeof GhlDispatchPayloadSchema>;

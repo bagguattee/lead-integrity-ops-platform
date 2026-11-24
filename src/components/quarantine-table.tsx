@@ -1,179 +1,389 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { resolveQuarantineAction } from "@/app/actions";
-import { CheckCircle2, Split, Trash2, ShieldAlert, Sparkles, AlertTriangle, Eye, X } from "lucide-react";
+import { QuarantineItem } from "@/lib/store";
+import { UserRole } from "@/contracts/lead-contracts";
+import {
+  CheckCircle2,
+  Edit3,
+  Eye,
+  Loader2,
+  Search,
+  ShieldAlert,
+  Split,
+  Trash2,
+  X,
+} from "lucide-react";
 
-interface QuarantineItem {
-  id: string;
-  reason: string;
-  contaminatingRecord: string | null;
-  rawPayload: string;
-  resolved: boolean;
-  createdAt: string;
+interface QuarantineTableProps {
+  initialRecords: QuarantineItem[];
+  tenantName: string;
+  complianceLaw: string;
+  currentRole: UserRole;
 }
 
-export function QuarantineTable({ initialRecords }: { initialRecords: QuarantineItem[] }) {
-  const [records, setRecords] = useState(initialRecords);
+export function QuarantineTable({
+  initialRecords,
+  tenantName,
+  complianceLaw,
+  currentRole,
+}: QuarantineTableProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [activeModalItem, setActiveModalItem] = useState<QuarantineItem | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [reasonFilter, setReasonFilter] = useState<string>("ALL");
+  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const handleResolve = async (
-    id: string,
-    action: "APPROVED_SYNC" | "SPLIT_MASTER" | "EDITED_FIELDS" | "PERMANENT_QUARANTINE"
-  ) => {
-    setLoadingId(id);
-    try {
-      await resolveQuarantineAction(id, action);
-      setRecords((prev) => prev.filter((r) => r.id !== id));
-      if (activeModalItem?.id === id) setActiveModalItem(null);
-    } catch (err: any) {
-      alert(err.message || "Failed to resolve quarantine record");
-    } finally {
-      setLoadingId(null);
-    }
+  const [inspectItem, setInspectItem] = useState<QuarantineItem | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+
+  const openInspector = (item: QuarantineItem) => {
+    setInspectItem(item);
+    setEditName(item.normalizedPreview.canonicalName || "");
+    setEditPhone(item.normalizedPreview.normalizedPhone || "");
+    setEditEmail(item.normalizedPreview.normalizedEmail || "");
   };
 
-  const getReasonBadge = (reason: string) => {
+  const handleResolve = (
+    id: string,
+    action: "APPROVED_SYNC" | "SPLIT_MASTER" | "EDITED_FIELDS" | "PERMANENT_QUARANTINE",
+    customFields?: { editedName?: string; editedPhone?: string; editedEmail?: string }
+  ) => {
+    setBanner(null);
+    setLoadingId(id);
+    startTransition(async () => {
+      await new Promise((r) => setTimeout(r, 180));
+      const res = await resolveQuarantineAction(id, action, customFields);
+      setLoadingId(null);
+      setBanner({ ok: res.ok, text: res.message });
+      if (res.ok && inspectItem?.id === id) {
+        setInspectItem(null);
+      }
+      router.refresh();
+    });
+  };
+
+  const unresolved = initialRecords.filter((r) => !r.resolved);
+  const filtered = unresolved.filter((r) => {
+    const matchesReason = reasonFilter === "ALL" || r.reason === reasonFilter;
+    const matchesSearch =
+      !searchQuery.trim() ||
+      r.normalizedPreview.canonicalName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.contaminatingRecord.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.rawPayload.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesReason && matchesSearch;
+  });
+
+  const renderReasonPill = (reason: string) => {
     switch (reason) {
       case "DNC_CLUSTER":
-        return <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 font-semibold">TCPA DNC CLUSTER</span>;
+        return (
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-[#FEE2E2] text-[#DC2626]">
+            DNC CLUSTER
+          </span>
+        );
       case "SHARED_HUB":
-        return <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold">SHARED HUB &gt;3 HOUSEHOLDS</span>;
+        return (
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-[#FEF3C7] text-[#D97706]">
+            SHARED HUB &gt;3
+          </span>
+        );
       case "TIME_GAP_REVIEW":
-        return <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">TIME-GAP &gt;5 YEARS</span>;
+        return (
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-[#F3E8FF] text-[#7C3AED]">
+            TIME GAP &gt;5Y
+          </span>
+        );
+      case "LOW_CONFIDENCE_HITL":
+        return (
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-[#EBF2FF] text-[#1D4ED8]">
+            LOW AI CONF
+          </span>
+        );
       default:
-        return <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">{reason}</span>;
+        return (
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-[#F1F5F9] text-[#64748B]">
+            INVALID SHAPE
+          </span>
+        );
     }
   };
 
-  if (records.length === 0) {
-    return (
-      <div className="p-16 text-center rounded-xl bg-[#0f172a]/40 border border-white/5">
-        <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-3">
-          <CheckCircle2 className="w-6 h-6" />
-        </div>
-        <h3 className="text-base font-semibold text-white">Quarantine Queue Clear</h3>
-        <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-          All inbound leads passed automated TCPA compliance gates, commercial broker hub isolation, and AI confidence boundaries.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <>
-      <div className="rounded-xl border border-white/5 bg-[#0b0f19] overflow-hidden shadow-xl">
-        <table className="w-full text-left text-xs text-slate-300">
-          <thead className="bg-[#080d18] text-[10px] uppercase font-mono text-slate-400 border-b border-white/5">
-            <tr>
-              <th className="px-5 py-3.5">Quarantine Classification</th>
-              <th className="px-5 py-3.5">Violation / Lineage Contamination</th>
-              <th className="px-5 py-3.5">Raw Ingestion Preview</th>
-              <th className="px-5 py-3.5 text-right">HITL Resolution Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {records.map((r) => (
-              <tr key={r.id} className="hover:bg-white/[0.02] transition">
-                <td className="px-5 py-4">
-                  {getReasonBadge(r.reason)}
-                  <span className="text-[10px] text-slate-500 font-mono block mt-1">ID: {r.id.slice(0, 14)}...</span>
-                </td>
-                <td className="px-5 py-4 text-xs font-mono text-slate-300 max-w-xs">
-                  {r.contaminatingRecord || "Unclassified boundary hit"}
-                </td>
-                <td className="px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[11px] text-slate-400 max-w-[280px] truncate block">
-                      {r.rawPayload}
-                    </span>
-                    <button
-                      onClick={() => setActiveModalItem(r)}
-                      className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition"
-                      title="Inspect full JSON payload"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </td>
-                <td className="px-5 py-4 text-right">
-                  <div className="flex items-center justify-end gap-1.5">
-                    <button
-                      disabled={loadingId === r.id}
-                      onClick={() => handleResolve(r.id, "APPROVED_SYNC")}
-                      className="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center gap-1 transition disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                    </button>
-                    <button
-                      disabled={loadingId === r.id}
-                      onClick={() => handleResolve(r.id, "SPLIT_MASTER")}
-                      className="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-blue-600/90 hover:bg-blue-500 text-white flex items-center gap-1 transition disabled:opacity-50"
-                    >
-                      <Split className="w-3.5 h-3.5" /> Split
-                    </button>
-                    <button
-                      disabled={loadingId === r.id}
-                      onClick={() => handleResolve(r.id, "PERMANENT_QUARANTINE")}
-                      className="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-rose-600/80 hover:bg-rose-600 text-white flex items-center gap-1 transition disabled:opacity-50"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" /> Reject
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="space-y-5">
+      {/* Inline Status / RBAC Banner */}
+      {banner && (
+        <div
+          data-testid="quarantine-status-banner"
+          className={`px-4 py-3 rounded-xl border text-xs font-semibold flex items-center justify-between ${
+            banner.ok
+              ? "bg-[#E3FAF4] border-[#B2EFE0] text-[#0B7A66]"
+              : "bg-rose-50 border-rose-200 text-rose-700"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {banner.ok ? <CheckCircle2 className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+            <span>{banner.text}</span>
+          </div>
+          <button type="button" onClick={() => setBanner(null)} className="text-[11px] underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Search & Reason Filter Bar */}
+      <div className="soax-card p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search quarantined contacts or phones..."
+            className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-[#E2EAF5] bg-[#FAFBFD] text-xs text-[#172554] focus:outline-none focus:border-[#1E5EFF]"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
+          {[
+            { key: "ALL", label: `All (${unresolved.length})` },
+            { key: "DNC_CLUSTER", label: "DNC Cluster" },
+            { key: "SHARED_HUB", label: "Shared Hub" },
+            { key: "TIME_GAP_REVIEW", label: "Time-Gap" },
+            { key: "LOW_CONFIDENCE_HITL", label: "Low AI Conf" },
+            { key: "INVALID_SHAPE", label: "Invalid Shape" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setReasonFilter(f.key)}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                reasonFilter === f.key
+                  ? "bg-[#1649C7] text-white"
+                  : "bg-[#F1F5FB] text-slate-600 hover:bg-[#E4ECF8]"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* JSON Payload Inspector Modal */}
-      {activeModalItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-lg rounded-xl bg-[#0f172a] border border-white/10 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-amber-400" />
-                <h3 className="text-sm font-semibold text-white">Quarantine Record Lineage</h3>
+      {/* Quarantine Queue Table */}
+      {filtered.length === 0 ? (
+        <div className="soax-card p-14 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-[#E3FAF4] text-[#0D9488] flex items-center justify-center mx-auto mb-3">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-[#172554]">Quarantine Queue Clear</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            No unresolved items match your active filter in {tenantName}.
+          </p>
+        </div>
+      ) : (
+        <div className="soax-card p-6 overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="text-[11px] font-semibold text-slate-400 border-b border-[#EEF2F8]">
+                <th className="py-3 pr-4">Safety Gate</th>
+                <th className="py-3 px-3">Prospect &amp; Normalized Preview</th>
+                <th className="py-3 px-3">Contaminating Dimension</th>
+                <th className="py-3 pl-4 text-right">HITL Resolution ({currentRole})</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F4F7FC]">
+              {filtered.map((item) => {
+                const isBusy = loadingId === item.id && isPending;
+                return (
+                  <tr key={item.id} className="hover:bg-[#F8FAFF] transition">
+                    <td className="py-4 pr-4 whitespace-nowrap">
+                      {renderReasonPill(item.reason)}
+                      <span className="block text-[10px] font-mono text-slate-400 mt-1">
+                        {item.id}
+                      </span>
+                    </td>
+                    <td className="py-4 px-3">
+                      <span className="font-bold text-[#172554] block">
+                        {item.normalizedPreview.canonicalName}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-500 block">
+                        {item.normalizedPreview.normalizedPhone ||
+                          item.normalizedPreview.normalizedEmail ||
+                          "No valid phone/email"}
+                      </span>
+                      {item.normalizedPreview.estimatedValue > 0 && (
+                        <span className="text-[11px] font-bold text-[#0D9488]">
+                          Est. ${item.normalizedPreview.estimatedValue.toLocaleString()}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-4 px-3 text-slate-600 max-w-xs">
+                      <p className="text-xs">{item.contaminatingRecord}</p>
+                    </td>
+                    <td className="py-4 pl-4 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openInspector(item)}
+                          data-testid={`edit-quarantine-${item.id}`}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#F1F5FB] hover:bg-[#E2EAF7] text-[#1E3A8A] font-bold inline-flex items-center gap-1 transition"
+                          title="Inspect & Edit Normalized Fields"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Edit / Diff
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleResolve(item.id, "APPROVED_SYNC")}
+                          data-testid={`approve-quarantine-${item.id}`}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#E3FAF4] hover:bg-[#2CE0B6] text-[#0D9488] hover:text-white font-bold inline-flex items-center gap-1 transition disabled:opacity-50"
+                        >
+                          {isBusy ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleResolve(item.id, "SPLIT_MASTER")}
+                          data-testid={`split-quarantine-${item.id}`}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#EBF2FF] hover:bg-[#1649C7] text-[#1D4ED8] hover:text-white font-bold inline-flex items-center gap-1 transition disabled:opacity-50"
+                        >
+                          <Split className="w-3.5 h-3.5" /> Split
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleResolve(item.id, "PERMANENT_QUARANTINE")}
+                          data-testid={`reject-quarantine-${item.id}`}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#FEE2E2] hover:bg-[#DC2626] text-[#DC2626] hover:text-white font-bold inline-flex items-center gap-1 transition disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Side-by-Side Diff & Field Editor Modal */}
+      {inspectItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0A194E]/45 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Inspect and Edit Quarantined Lead"
+        >
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col bg-white rounded-2xl border border-[#E4EBF5] shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 bg-[#F8FAFE] border-b border-[#E8EEF6] flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-[#172554]">
+                  HITL Quarantine Comparison &amp; Override
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {complianceLaw} • Gate: <strong>{inspectItem.reason}</strong>
+                </p>
               </div>
               <button
-                onClick={() => setActiveModalItem(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                type="button"
+                onClick={() => setInspectItem(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-2 text-xs">
-              <p className="text-slate-400 font-mono">Classification Reason: <span className="text-amber-400 font-bold">{activeModalItem.reason}</span></p>
-              <p className="text-slate-400 font-mono">Offending Dimension: <span className="text-slate-200">{activeModalItem.contaminatingRecord}</span></p>
+            <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Left: Raw Ingested Payload */}
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                  Raw Ingested Payload
+                </span>
+                <pre className="p-3.5 rounded-xl bg-[#F4F7FC] border border-[#E4ECF6] text-[11px] font-mono text-[#172554] overflow-x-auto max-h-60">
+                  {JSON.stringify(JSON.parse(inspectItem.rawPayload), null, 2)}
+                </pre>
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-3">
+                  <strong>Reason:</strong> {inspectItem.contaminatingRecord}
+                </p>
+              </div>
+
+              {/* Right: Editable Canonical Fields */}
+              <div className="space-y-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#0D9488] block">
+                  Editable Normalized Fields
+                </span>
+                <div>
+                  <label className="text-xs font-semibold text-[#172554] block mb-1">Canonical Name</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs text-[#172554]"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-[#172554] block mb-1">Phone (auto-formats to E.164)</label>
+                  <input
+                    type="text"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="Enter valid phone..."
+                    className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs font-mono text-[#172554]"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-[#172554] block mb-1">Email</label>
+                  <input
+                    type="text"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    placeholder="contact@company.com"
+                    className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs font-mono text-[#172554]"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div>
-              <p className="text-xs text-slate-400 font-mono mb-1">Raw Ingested JSON:</p>
-              <pre className="p-3 rounded-lg bg-[#070a11] border border-white/5 text-[11px] font-mono text-emerald-400 overflow-x-auto max-h-56">
-                {JSON.stringify(JSON.parse(activeModalItem.rawPayload), null, 2)}
-              </pre>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+            <div className="px-6 py-4 bg-[#F8FAFE] border-t border-[#E8EEF6] flex items-center justify-end gap-2.5 flex-shrink-0">
               <button
-                onClick={() => handleResolve(activeModalItem.id, "PERMANENT_QUARANTINE")}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 text-white"
+                type="button"
+                onClick={() => handleResolve(inspectItem.id, "PERMANENT_QUARANTINE")}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA] transition"
               >
-                Reject & Delete
+                Confirm Permanent Block
               </button>
               <button
-                onClick={() => handleResolve(activeModalItem.id, "APPROVED_SYNC")}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white"
+                type="button"
+                disabled={isPending}
+                onClick={() =>
+                  handleResolve(inspectItem.id, "EDITED_FIELDS", {
+                    editedName: editName,
+                    editedPhone: editPhone,
+                    editedEmail: editEmail,
+                  })
+                }
+                data-testid="modal-save-sync-btn"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#1649C7] hover:bg-[#1E5EFF] text-white flex items-center gap-1.5 transition"
               >
-                Override & Sync GHL
+                {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Save Edits &amp; Sync to GHL
               </button>
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

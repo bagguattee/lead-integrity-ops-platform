@@ -1,53 +1,58 @@
-import { PrismaClient } from "@prisma/client";
-import { checkAndRecordFinOps } from "../src/lib/finops";
-
-const prisma = new PrismaClient();
+import { getTenantSnapshot, ingestStoreBatch, updateStoreBudgetPolicy } from "../src/lib/store";
 
 async function verifyFinOpsBudgetCap() {
   console.log("=== Verification Gate 5: Pre-Flight FinOps Circuit Breaker ===");
 
-  const tenant = await prisma.tenant.findUnique({ where: { slug: "apex-roofing" } });
-  if (!tenant) throw new Error("Tenant not found");
-
-  // Set budget cap to $1.00 (100 cents) and set current spend to $1.00 (reached)
-  await prisma.budgetPolicy.update({
-    where: { tenantId: tenant.id },
-    data: {
-      monthlyCapCents: 100,
-      currentSpendCents: 100,
-    },
+  // Set cap below current spend ($1.00 = 100 cents)
+  updateStoreBudgetPolicy({
+    slugOrId: "apex-roofing",
+    role: "ADMIN",
+    actorName: "FinOps Tester",
+    monthlyCapCents: 100,
+    warningThreshold: 80,
   });
 
-  const check = await checkAndRecordFinOps(
-    tenant.id,
-    null,
-    "+15125550888",
-    false // Paid lookup
+  const before = getTenantSnapshot("apex-roofing");
+  const run = ingestStoreBatch(
+    "apex-roofing",
+    [
+      {
+        name: "Budget Cap Test Lead",
+        phone: "512-555-0819",
+        email: "captest@domain.com",
+        estimated_value: 15000,
+        notes: "Checking pre-flight cap degradation",
+      },
+    ],
+    "N8N_WEBHOOK",
+    "finops_cap_probe",
+    "US"
   );
 
-  console.log("FinOps Check Result at Budget Cap:", check);
+  const after = getTenantSnapshot("apex-roofing");
+  const row = run.lineage[0];
 
-  if (check.allowed !== false || check.status !== "BUDGET_CAPPED" || check.costCents !== 0) {
-    throw new Error("FAILED: Paid lookup was permitted after budget cap was reached!");
+  if (
+    run.costCents !== 0 ||
+    row.finOpsProvider !== "BUDGET_CAPPED" ||
+    after.tenant.budget.currentSpendCents !== before.tenant.budget.currentSpendCents
+  ) {
+    throw new Error("FAILED: Paid lookup executed after monthly FinOps cap was reached!");
   }
 
-  // Restore budget policy
-  await prisma.budgetPolicy.update({
-    where: { tenantId: tenant.id },
-    data: {
-      monthlyCapCents: 5000,
-      currentSpendCents: 150,
-    },
+  // Restore $50.00 cap
+  updateStoreBudgetPolicy({
+    slugOrId: "apex-roofing",
+    role: "ADMIN",
+    actorName: "FinOps Tester",
+    monthlyCapCents: 5000,
+    warningThreshold: 80,
   });
 
-  console.log("PASS: FinOps Circuit Breaker refused pre-flight successfully. Zero bill shock.\n");
+  console.log("PASS: FinOps Circuit Breaker degraded cleanly to $0.00 BUDGET_CAPPED without dropping the lead.\n");
 }
 
-verifyFinOpsBudgetCap()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+verifyFinOpsBudgetCap().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

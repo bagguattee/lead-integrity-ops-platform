@@ -1,4 +1,10 @@
 import { execSync } from "child_process";
+import path from "path";
+
+const tsxBin =
+  process.platform === "win32"
+    ? path.join("node_modules", ".bin", "tsx.cmd")
+    : path.join("node_modules", ".bin", "tsx");
 
 const scripts = [
   "scripts/verify-tenant-isolation.ts",
@@ -7,24 +13,25 @@ const scripts = [
   "scripts/verify-hub-and-timegap.ts",
   "scripts/verify-finops-budget-cap.ts",
   "scripts/verify-rbac-actions.ts",
+  "scripts/verify-lead-engineer-suite.ts",
 ];
 
 console.log("===============================================================");
-console.log("  LEAD INTEGRITY OPS PLATFORM - 6-GATE VERIFICATION SUITE");
+console.log("  INTEGRITY OPS - DETERMINISTIC VERIFICATION GATES");
 console.log("===============================================================\n");
 
 let passed = 0;
 
 for (const script of scripts) {
   try {
-    execSync(`.\\node_modules\\.bin\\tsx.cmd ${script}`, { stdio: "inherit" });
+    execSync(`"${tsxBin}" ${script}`, { stdio: "inherit" });
     passed++;
-  } catch (err) {
+  } catch {
     console.error(`\nFAILED at ${script}`);
     process.exit(1);
   }
 }
 
 console.log("===============================================================");
-console.log(`  ALL ${passed}/6 VERIFICATION GATES PASSED DETERMINISTICALLY!`);
+console.log(`  ALL ${passed}/${scripts.length} VERIFICATION SUITES PASSED DETERMINISTICALLY!`);
 console.log("===============================================================\n");

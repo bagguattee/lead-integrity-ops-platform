@@ -1,106 +1,97 @@
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { SessionData, sessionOptions, defaultSession } from "./session";
-import { prisma } from "./prisma";
+import { getTenantSnapshot, resolveTenantSlug } from "./store";
+import { UserRole } from "../contracts/lead-contracts";
 
+/**
+ * Strictly read-only session resolver safe for React Server Components AND Server Actions.
+ * Never mutates cookies during RSC render.
+ */
 export async function getCurrentSession(): Promise<SessionData> {
-  const cookieStore = await cookies();
-  const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
+  try {
+    const cookieStore = await cookies();
+    const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
 
-  if (!session.isLoggedIn) {
-    try {
-      // If not logged in, auto-login as Demo Admin for immediate 1-click preview
-      const defaultTenant = await prisma.tenant.findUnique({
-        where: { slug: "apex-roofing" },
-      });
-      const defaultUser = await prisma.user.findUnique({
-        where: { email: "admin@apexroofing.com" },
-      });
-
-      if (defaultTenant && defaultUser) {
-        session.userId = defaultUser.id;
-        session.userEmail = defaultUser.email;
-        session.userName = defaultUser.name;
-        session.tenantId = defaultTenant.id;
-        session.tenantName = defaultTenant.name;
-        session.role = "ADMIN";
-        session.isLoggedIn = true;
-        await session.save();
-      } else {
-        return {
-          userId: "demo_admin_fallback",
-          userEmail: "admin@apexroofing.com",
-          userName: "Marcus Vance (Ops Lead)",
-          tenantId: "demo_tenant_apex",
-          tenantName: "Apex Roofing TX",
-          role: "ADMIN",
-          isLoggedIn: true,
-        };
-      }
-    } catch (e) {
-      // Database not ready yet, provide instant demo session
+    if (session.isLoggedIn && (session.tenantSlug || session.tenantId)) {
+      const slug = resolveTenantSlug(session.tenantSlug || session.tenantId);
+      const snap = getTenantSnapshot(slug);
       return {
-        userId: "demo_admin_fallback",
-        userEmail: "admin@apexroofing.com",
-        userName: "Marcus Vance (Ops Lead)",
-        tenantId: "demo_tenant_apex",
-        tenantName: "Apex Roofing TX",
-        role: "ADMIN",
+        userId: session.userId || defaultSession.userId,
+        userEmail: session.userEmail || defaultSession.userEmail,
+        userName: session.userName || defaultSession.userName,
+        tenantId: snap.tenant.id,
+        tenantSlug: snap.tenant.slug,
+        tenantName: snap.tenant.name,
+        role: session.role || "ADMIN",
         isLoggedIn: true,
       };
     }
+  } catch {
+    // Fallback cleanly if invoked outside request context
   }
 
+  return { ...defaultSession };
+}
+
+/**
+ * Mutates encrypted iron-session cookie directly on a Next.js Request/Response pair (Route Handlers).
+ */
+export async function applySessionSwitchOnResponse(
+  req: Request,
+  res: Response,
+  tenantSlugInput: string,
+  roleOverride?: UserRole
+): Promise<SessionData> {
+  const session = await getIronSession<SessionData>(req, res, sessionOptions);
+  const slug = resolveTenantSlug(tenantSlugInput);
+  const snap = getTenantSnapshot(slug);
+
+  session.userId = session.userId || defaultSession.userId;
+  session.userEmail = session.userEmail || defaultSession.userEmail;
+  session.userName = session.userName || defaultSession.userName;
+  session.tenantId = snap.tenant.id;
+  session.tenantSlug = snap.tenant.slug;
+  session.tenantName = snap.tenant.name;
+  session.role = roleOverride || session.role || "ADMIN";
+  session.isLoggedIn = true;
+
+  await session.save();
   return session;
 }
 
-export async function switchTenantSession(tenantSlug: string): Promise<SessionData> {
+/**
+ * Mutates encrypted iron-session cookie inside a Next.js "use server" Server Action.
+ */
+export async function mutateServerActionSession(updates: {
+  tenantSlug?: string;
+  role?: UserRole;
+}): Promise<SessionData> {
   const cookieStore = await cookies();
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
 
-  try {
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-    });
+  const nextSlug = resolveTenantSlug(updates.tenantSlug || session.tenantSlug || "apex-roofing");
+  const snap = getTenantSnapshot(nextSlug);
 
-    if (tenant) {
-      session.tenantId = tenant.id;
-      session.tenantName = tenant.name;
+  const roleUserMap: Record<UserRole, { id: string; name: string; email: string }> = {
+    OWNER: { id: "u_1", name: "Marcus Vance", email: "marcus@integrityops.io" },
+    ADMIN: { id: "u_1", name: "Marcus Vance", email: "marcus@integrityops.io" },
+    REVIEWER: { id: "u_2", name: "Sarah Jenkins", email: "sarah@integrityops.io" },
+    VIEWER: { id: "u_3", name: "Alex Mercer (Auditor)", email: "alex@integrityops.io" },
+  };
 
-      if (session.userId) {
-        const membership = await prisma.membership.findFirst({
-          where: {
-            userId: session.userId,
-            tenantId: tenant.id,
-          },
-        });
-        if (membership) {
-          session.role = (membership.role as any) || "VIEWER";
-        }
-      }
-      session.isLoggedIn = true;
-      await session.save();
-      return session;
-    }
-  } catch (e) {
-    // If database unavailable, fallback to demo tenant switching
-  }
+  const nextRole = updates.role || session.role || "ADMIN";
+  const identity = roleUserMap[nextRole];
 
-  // Pure memory/cookie fallback for instant demo workspace switching
-  if (tenantSlug === "summit-solar") {
-    session.tenantId = "demo_tenant_summit";
-    session.tenantName = "Summit Solar AU";
-    session.role = "OWNER";
-  } else {
-    session.tenantId = "demo_tenant_apex";
-    session.tenantName = "Apex Roofing TX";
-    session.role = "ADMIN";
-  }
-  session.userId = session.userId || "demo_admin_fallback";
-  session.userName = session.userName || "Marcus Vance (Ops Lead)";
-  session.userEmail = session.userEmail || "admin@apexroofing.com";
+  session.userId = identity.id;
+  session.userName = identity.name;
+  session.userEmail = identity.email;
+  session.tenantId = snap.tenant.id;
+  session.tenantSlug = snap.tenant.slug;
+  session.tenantName = snap.tenant.name;
+  session.role = nextRole;
   session.isLoggedIn = true;
-  await session.save();
 
+  await session.save();
   return session;
 }

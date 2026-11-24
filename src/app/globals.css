@@ -4,26 +4,33 @@
 
 @layer base {
   :root {
-    --bg-app: #090d16;
-    --bg-surface: #0f172a;
-    --bg-surface-elevated: #162032;
-    --border-subtle: rgba(255, 255, 255, 0.08);
-    --border-focus: #3b82f6;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --bg-canvas: #f4f7fc;
+    --bg-card: #ffffff;
+    --border-soft: #e8eef6;
+    --navy-950: #0a2472;
+    --navy-900: #172554;
+    --royal-600: #1649c7;
+    --royal-500: #1e5eff;
+    --mint-400: #36dfc0;
+    --mint-500: #1cc4a8;
   }
 
   body {
-    background-color: var(--bg-app);
-    color: var(--text-primary);
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
-    letter-spacing: -0.011em;
+    background-color: var(--bg-canvas);
+    color: var(--navy-900);
+    font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    letter-spacing: -0.01em;
     -webkit-font-smoothing: antialiased;
+  }
+
+  code,
+  pre,
+  .font-mono {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 }
 
-/* Custom scrollbar */
+/* Clean subtle scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -32,48 +39,42 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(23, 37, 84, 0.14);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(23, 37, 84, 0.26);
 }
 
-/* Precision Glass Panels */
-.glass-panel {
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+/* Signature Reference Sidebar Gradient */
+.sidebar-ocean-gradient {
+  background: linear-gradient(180deg, #081e6b 0%, #0d328f 42%, #1d80a6 78%, #54d6c4 100%);
 }
 
-.glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+/* Signature Soft Diffused Card Shadow */
+.soax-card {
+  background: #ffffff;
+  border: 1px solid #edf1f8;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 38, 95, 0.05);
 }
 
-.glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(20, 30, 50, 0.7);
+.soax-method-card {
+  background: #ffffff;
+  border: 1.5px solid #eef2f8;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 38, 95, 0.055);
+  transition: all 0.18s ease;
 }
 
-/* Micro badges */
-.badge-clean {
-  background: rgba(16, 185, 129, 0.1);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+.soax-method-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(15, 38, 95, 0.085);
 }
 
-.badge-merged {
-  background: rgba(59, 130, 246, 0.1);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.25);
-}
-
-.badge-quarantined {
-  background: rgba(245, 158, 11, 0.1);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.25);
+.soax-method-card-active {
+  background: #ffffff;
+  border: 1.5px solid #38d9c0;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(44, 224, 182, 0.14);
 }

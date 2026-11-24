@@ -1,50 +1,80 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import {
+  dispatchStoreReactivation,
+  getTenantSnapshot,
+  resolveStoreQuarantine,
+  toggleStoreEnrichmentPause,
+  updateStoreBudgetPolicy,
+} from "../src/lib/store";
 
 async function verifyRbacActions() {
-  console.log("=== Verification Gate 6: RBAC Mutation Permissions ===");
+  console.log("=== Verification Gate 6: Action-Level RBAC Enforcement ===");
 
-  const tenant = await prisma.tenant.findUnique({ where: { slug: "apex-roofing" } });
-  if (!tenant) throw new Error("Tenant not found");
+  const snap = getTenantSnapshot("apex-roofing");
+  const qItem = snap.tenant.quarantine.find((q) => !q.resolved);
+  const mItem = snap.tenant.masters[0];
 
-  const viewerMembership = await prisma.membership.findFirst({
-    where: { tenantId: tenant.id, role: "VIEWER" },
-    include: { user: true },
-  });
+  if (!qItem || !mItem) throw new Error("Missing seeded items for RBAC verification");
 
-  if (!viewerMembership) throw new Error("Viewer membership not found");
-
-  console.log(`Checking mutations for user: ${viewerMembership.user.name} (Role: ${viewerMembership.role})`);
-
-  // Emulate Action-level RBAC check
-  const simulateViewerOverride = () => {
-    if (viewerMembership.role === "VIEWER") {
-      throw new Error("403 Forbidden: Viewers cannot mutate quarantine records");
-    }
-  };
-
-  let caught403 = false;
+  // 1. VIEWER must get 403 on quarantine resolution
+  let viewerBlockedQuarantine = false;
   try {
-    simulateViewerOverride();
-  } catch (err: any) {
-    if (err.message.includes("403 Forbidden")) {
-      caught403 = true;
-    }
+    resolveStoreQuarantine({
+      slugOrId: "apex-roofing",
+      role: "VIEWER",
+      actorName: "Alex Auditor",
+      quarantineId: qItem.id,
+      action: "PERMANENT_QUARANTINE",
+    });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes("403 Forbidden")) viewerBlockedQuarantine = true;
   }
 
-  if (!caught403) {
-    throw new Error("FAILED: Viewer was able to invoke privileged mutation!");
+  // 2. VIEWER & REVIEWER must get 403 on FinOps budget policy change
+  let reviewerBlockedBudget = false;
+  try {
+    updateStoreBudgetPolicy({
+      slugOrId: "apex-roofing",
+      role: "REVIEWER",
+      actorName: "Sarah Reviewer",
+      monthlyCapCents: 99900,
+      warningThreshold: 90,
+    });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes("403 Forbidden")) reviewerBlockedBudget = true;
   }
 
-  console.log("PASS: Action-level RBAC correctly blocked unauthorized VIEWER mutation with 403 Forbidden.\n");
+  // 3. VIEWER must get 403 on GHL reactivation dispatch & pause toggle
+  let viewerBlockedDispatch = false;
+  try {
+    dispatchStoreReactivation({
+      slugOrId: "apex-roofing",
+      role: "VIEWER",
+      actorName: "Alex Auditor",
+      masterId: mItem.id,
+    });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes("403 Forbidden")) viewerBlockedDispatch = true;
+  }
+
+  let viewerBlockedPause = false;
+  try {
+    toggleStoreEnrichmentPause({
+      slugOrId: "apex-roofing",
+      role: "VIEWER",
+      actorName: "Alex Auditor",
+    });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes("403 Forbidden")) viewerBlockedPause = true;
+  }
+
+  if (!viewerBlockedQuarantine || !reviewerBlockedBudget || !viewerBlockedDispatch || !viewerBlockedPause) {
+    throw new Error("FAILED: Unauthorized role bypassed action-level RBAC gate!");
+  }
+
+  console.log("PASS: VIEWER & REVIEWER unauthorized mutations strictly rejected with 403 Forbidden.\n");
 }
 
-verifyRbacActions()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+verifyRbacActions().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

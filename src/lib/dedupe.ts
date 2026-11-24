@@ -21,7 +21,7 @@ export interface DedupeClassification {
 
 /**
  * Evaluates whether an inbound normalized lead should be:
- * 1. QUARANTINED (Invalid shape, DNC Cluster contamination, Shared Commercial Hub >3 households, Time-Gap >5 years).
+ * 1. QUARANTINED (Invalid shape, DNC Cluster contamination, Shared Commercial Hub >3 households, Time-Gap >5 years, Low AI Confidence <0.70).
  * 2. MERGED into an existing Master (Exact Phone or Email match).
  * 3. Created as a NEW Master.
  */
@@ -30,7 +30,7 @@ export function classifyLeadDedupe(
   existingMasters: ExistingLeadRecord[],
   phoneHouseholdCountMap: Map<string, number>
 ): DedupeClassification {
-  // Gate 1: Check minimum valid shape (Must have at least a valid phone OR valid email)
+  // Gate 1: Minimum valid shape (Must have at least a valid phone OR valid email)
   if (!incoming.normalizedPhone && !incoming.normalizedEmail) {
     return {
       type: "QUARANTINE",
@@ -39,19 +39,24 @@ export function classifyLeadDedupe(
     };
   }
 
-  // Gate 2: TCPA Opt-Out Check
+  // Gate 2: Direct Inbound TCPA / DNC Opt-Out Check
   if (incoming.isTcpaOptedOut) {
     return {
       type: "QUARANTINE",
       quarantineReason: "DNC_CLUSTER",
-      contaminatingRecord: `Inbound lead flagged as DNC/TCPA Revoked: ${incoming.normalizedPhone || incoming.normalizedEmail}`,
+      contaminatingRecord: `Inbound lead flagged as DNC/Opt-Out: ${incoming.normalizedPhone || incoming.normalizedEmail}`,
     };
   }
 
-  // Gate 3: Shared Commercial Hub Check (>3 distinct names/households sharing the exact same phone line)
+  // Gate 3: Shared Commercial Hub Check (>3 distinct households sharing the exact same phone line)
   if (incoming.normalizedPhone) {
     const householdCount = phoneHouseholdCountMap.get(incoming.normalizedPhone) || 0;
-    if (householdCount >= 3) {
+    const exactSamePersonExists = existingMasters.some(
+      (m) =>
+        m.normalizedPhone === incoming.normalizedPhone &&
+        m.canonicalName.toLowerCase() === incoming.canonicalName.toLowerCase()
+    );
+    if (householdCount >= 3 && !exactSamePersonExists) {
       return {
         type: "QUARANTINE",
         quarantineReason: "SHARED_HUB",
@@ -61,13 +66,14 @@ export function classifyLeadDedupe(
   }
 
   // Gate 4: Search for existing master matches
+  const referenceTime = incoming.dateParsed ? incoming.dateParsed.getTime() : Date.now();
+
   for (const master of existingMasters) {
-    const phoneMatch = incoming.normalizedPhone && master.normalizedPhone === incoming.normalizedPhone;
-    const emailMatch = incoming.normalizedEmail && master.normalizedEmail === incoming.normalizedEmail;
+    const phoneMatch = Boolean(incoming.normalizedPhone && master.normalizedPhone === incoming.normalizedPhone);
+    const emailMatch = Boolean(incoming.normalizedEmail && master.normalizedEmail === incoming.normalizedEmail);
 
     if (phoneMatch || emailMatch) {
-      // Gate 4a: DNC Cluster Quarantine Propagation
-      // If the matched master was TCPA opted out, we quarantine the inbound lead to prevent illegal outreach
+      // Gate 4a: DNC Cluster Quarantine Propagation (Compliance Overrides Revenue)
       if (master.isTcpaOptedOut) {
         return {
           type: "QUARANTINE",
@@ -77,10 +83,8 @@ export function classifyLeadDedupe(
       }
 
       // Gate 4b: 5-Year Time-Gap Demotion
-      // If contact occurred > 5 years ago (1825 days), demote to HITL review rather than auto-merging blindly
-      const now = new Date().getTime();
-      const masterCreated = new Date(master.createdAt).getTime();
-      const diffYears = (now - masterCreated) / (1000 * 60 * 60 * 24 * 365.25);
+      const masterTime = new Date(master.createdAt).getTime();
+      const diffYears = Math.abs(referenceTime - masterTime) / (1000 * 60 * 60 * 24 * 365.25);
 
       if (diffYears >= 5.0) {
         return {
@@ -90,21 +94,22 @@ export function classifyLeadDedupe(
         };
       }
 
-      // Exact match -> Merge as Alias
+      // Determine exact vs household match tier
+      const sameName = master.canonicalName.toLowerCase() === incoming.canonicalName.toLowerCase();
       return {
         type: "MERGE_ALIAS",
-        matchTier: phoneMatch ? "TIER_1_EXACT" : "TIER_2_FUZZY",
+        matchTier: phoneMatch ? (sameName ? "TIER_1_EXACT" : "SHARED_HOUSEHOLD") : "TIER_2_FUZZY",
         matchedMasterId: master.id,
       };
     }
   }
 
-  // Gate 5: Check low confidence AI triage if already tagged
-  if (incoming.triageConfidence < 0.70) {
+  // Gate 5: Low AI Confidence Score (< 0.70) routes to HITL Review Queue
+  if (incoming.triageConfidence < 0.7) {
     return {
       type: "QUARANTINE",
       quarantineReason: "LOW_CONFIDENCE_HITL",
-      contaminatingRecord: `Low AI confidence score: ${incoming.triageConfidence.toFixed(2)}`,
+      contaminatingRecord: `Low AI triage confidence (${incoming.triageConfidence.toFixed(2)}) for "${incoming.canonicalName}"`,
     };
   }
 
