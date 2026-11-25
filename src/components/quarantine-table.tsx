@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { resolveQuarantineAction } from "@/app/actions";
 import { QuarantineItem } from "@/lib/store";
 import { UserRole } from "@/contracts/lead-contracts";
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Edit3,
   Eye,
   Loader2,
@@ -35,7 +37,15 @@ export function QuarantineTable({
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [reasonFilter, setReasonFilter] = useState<string>("ALL");
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [optimisticRecords, markOptimisticallyResolved] = useOptimistic(
+    initialRecords,
+    (state: QuarantineItem[], resolvedId: string) =>
+      state.map((r) => (r.id === resolvedId ? { ...r, resolved: true } : r))
+  );
 
   const [inspectItem, setInspectItem] = useState<QuarantineItem | null>(null);
   const [editName, setEditName] = useState("");
@@ -57,7 +67,9 @@ export function QuarantineTable({
     setBanner(null);
     setLoadingId(id);
     startTransition(async () => {
-      await new Promise((r) => setTimeout(r, 180));
+      if (currentRole !== "VIEWER") {
+        markOptimisticallyResolved(id);
+      }
       const res = await resolveQuarantineAction(id, action, customFields);
       setLoadingId(null);
       setBanner({ ok: res.ok, text: res.message });
@@ -68,7 +80,7 @@ export function QuarantineTable({
     });
   };
 
-  const unresolved = initialRecords.filter((r) => !r.resolved);
+  const unresolved = optimisticRecords.filter((r) => !r.resolved);
   const filtered = unresolved.filter((r) => {
     const matchesReason = reasonFilter === "ALL" || r.reason === reasonFilter;
     const matchesSearch =
@@ -78,6 +90,10 @@ export function QuarantineTable({
       r.rawPayload.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesReason && matchesSearch;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedFiltered = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const renderReasonPill = (reason: string) => {
     switch (reason) {
@@ -186,18 +202,19 @@ export function QuarantineTable({
           </p>
         </div>
       ) : (
-        <div className="soax-card p-6 overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="text-[11px] font-semibold text-slate-400 border-b border-[#EEF2F8]">
-                <th className="py-3 pr-4">Safety Gate</th>
-                <th className="py-3 px-3">Prospect &amp; Normalized Preview</th>
-                <th className="py-3 px-3">Contaminating Dimension</th>
-                <th className="py-3 pl-4 text-right">HITL Resolution ({currentRole})</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#F4F7FC]">
-              {filtered.map((item) => {
+        <div className="soax-card p-6 space-y-4">
+          <div className="overflow-x-auto max-h-[460px] overflow-y-auto border border-[#F1F5FB] rounded-xl">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead className="sticky top-0 bg-white z-10 shadow-[0_1px_0_#EEF2F8]">
+                <tr className="text-[11px] font-semibold text-slate-400">
+                  <th className="py-3 pl-3 pr-4">Safety Gate</th>
+                  <th className="py-3 px-3">Prospect &amp; Normalized Preview</th>
+                  <th className="py-3 px-3">Contaminating Dimension</th>
+                  <th className="py-3 pl-4 pr-3 text-right">HITL Resolution ({currentRole})</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#F4F7FC]">
+                {pagedFiltered.map((item) => {
                 const isBusy = loadingId === item.id && isPending;
                 return (
                   <tr key={item.id} className="hover:bg-[#F8FAFF] transition">
@@ -274,7 +291,38 @@ export function QuarantineTable({
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </div>
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span>
+              Showing{" "}
+              <strong className="text-[#172554]">
+                {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, filtered.length)}
+              </strong>{" "}
+              of <strong className="text-[#172554]">{filtered.length}</strong> unresolved exceptions
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded-lg border border-[#E4ECF6] disabled:opacity-40 flex items-center gap-1 font-semibold"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+              </button>
+              <span className="font-mono text-[11px] font-bold text-[#172554]">
+                Page {safePage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded-lg border border-[#E4ECF6] disabled:opacity-40 flex items-center gap-1 font-semibold"
+              >
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

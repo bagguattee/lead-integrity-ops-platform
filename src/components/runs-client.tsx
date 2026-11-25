@@ -71,6 +71,30 @@ export function RunsClient({ snapshot, currentRole }: RunsClientProps) {
     }
   };
 
+  const loadScaleStressCsv = () => {
+    setBanner(null);
+    setFileName(`${tenant.slug}_30_lead_scale_test.csv`);
+    const rows = ["name,phone,email,estimated_value,notes,is_dnc,created_at"];
+    for (let i = 1; i <= 30; i++) {
+      const num = String(2000 + i).padStart(4, "0");
+      const phone =
+        locale === "AU"
+          ? `0419 55${num.slice(0, 1)} ${num.slice(1)}`
+          : locale === "UK"
+            ? `07700 91${num}`
+            : `(512) 555-${num}`;
+      const isDnc = i % 10 === 0 ? "true" : "false";
+      const val = 8500 + i * 450;
+      const note =
+        i % 5 === 0
+          ? "Active storm leak in attic — urgent inspection"
+          : "Requesting free on-site assessment";
+      const dt = locale === "US" ? "11/25/2026" : "25/11/2026";
+      rows.push(`Scale Lead ${i},${phone},scale.lead.${i}@example.com,${val},"${note}",${isDnc},${dt}`);
+    }
+    setCsvText(rows.join("\n"));
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -157,7 +181,7 @@ export function RunsClient({ snapshot, currentRole }: RunsClientProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={loadSampleCsv}
@@ -165,6 +189,14 @@ export function RunsClient({ snapshot, currentRole }: RunsClientProps) {
               className="px-3.5 py-2 rounded-lg bg-[#EEF4FF] hover:bg-[#DCE8FF] text-[#1649C7] text-xs font-bold transition"
             >
               Load Sample Dirty CSV ({locale})
+            </button>
+            <button
+              type="button"
+              onClick={loadScaleStressCsv}
+              data-testid="load-stress-csv-btn"
+              className="px-3.5 py-2 rounded-lg bg-[#E3FAF4] hover:bg-[#CCF5EA] text-[#0E9F84] text-xs font-bold transition"
+            >
+              Load 30-Lead Scale Batch
             </button>
             <label className="px-3.5 py-2 rounded-lg bg-[#F1F5FB] hover:bg-[#E3EAF6] text-[#172554] text-xs font-bold cursor-pointer flex items-center gap-1.5 transition">
               <Upload className="w-3.5 h-3.5" /> Choose .CSV File

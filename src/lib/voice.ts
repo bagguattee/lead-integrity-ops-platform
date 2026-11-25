@@ -473,6 +473,155 @@ export function outcomeLabel(o: CallOutcome): string {
   return map[o];
 }
 
+/* ───────────────────── Interactive 2-Way Customer Simulator ──────────────── */
+
+export interface InteractiveTurnResult {
+  agentReply: string;
+  newToolEvents: ToolEvent[];
+  shouldEndCall: boolean;
+  endedReason?: string;
+}
+
+const HUMAN_TRANSFER_RE = /(human|manager|supervisor|real person|speak to someone|billing|dispute|lawyer|attorney|sue)/i;
+const PRICING_RE = /(how much|price|cost|quote|expensive|estimate|ballpark|\$)/i;
+const CONFIRM_SLOT_RE = /(first|10:00|10 am|morning|second|14:00|2:00|2 pm|afternoon|works for me|sounds good|book it|confirm|yes please|sure|let's do|that works)/i;
+const GREET_OR_OPEN_RE = /(yes|yeah|sure|go ahead|who is this|speaking|available|slots|times|when|schedule|inspect|book|hello|hi)/i;
+
+/**
+ * Real-time interactive agent response engine for 2-way call testing
+ * where the human reviewer plays the homeowner/customer.
+ *
+ * Enforces deterministic compliance guardrails FIRST (mid-call opt-out revocation,
+ * human escalation, no fabricated pricing), then slot lookup & booking tools.
+ */
+export function evaluateInteractiveCustomerTurn(params: {
+  customerMessage: string;
+  contactName: string;
+  tenantName: string;
+  locale: SupportedLocale;
+  config: VoiceAgentConfig;
+  existingToolEvents: ToolEvent[];
+  now: Date;
+}): InteractiveTurnResult {
+  const msg = params.customerMessage.trim();
+  const first = params.contactName.split(/\s+/)[0] || "there";
+  const service = serviceLabel(params.locale);
+  const [slotA, slotB] = buildSlots(params.now, params.locale);
+  const hasCheckedAvailability = params.existingToolEvents.some((e) => e.name === "check_availability");
+  const hasBooked = params.existingToolEvents.some((e) => e.name === "book_appointment");
+
+  // 1. DETERMINISTIC COMPLIANCE GUARD #1: Mid-Call Consent Revocation (TCPA / DNCR / PECR)
+  if (OPT_OUT_RE.test(msg)) {
+    return {
+      agentReply: `Understood, ${first} — I am flagging your number Do-Not-Call right now and removing your household from all future outreach. I apologize for the interruption. Have a good day.`,
+      newToolEvents: [
+        {
+          name: "flag_do_not_call",
+          args: { reason: "mid_call_customer_revocation", utterance: msg.slice(0, 80) },
+          result: "DNC flag applied + household cluster quarantined",
+        },
+      ],
+      shouldEndCall: true,
+      endedReason: "customer-revoked-consent-dnc",
+    };
+  }
+
+  // 2. DETERMINISTIC COMPLIANCE GUARD #2: Human Escalation / Dispute
+  if (HUMAN_TRANSFER_RE.test(msg)) {
+    return {
+      agentReply: `Of course, ${first}. Let me warm-transfer you directly to a licensed specialist at ${params.tenantName} on ${params.config.transferNumber}. One moment please.`,
+      newToolEvents: [
+        {
+          name: "transfer_to_human",
+          args: { targetNumber: params.config.transferNumber, reason: "customer_requested_specialist" },
+          result: `Warm transfer initiated to ${params.config.transferNumber}`,
+        },
+      ],
+      shouldEndCall: true,
+      endedReason: "transferred-to-human",
+    };
+  }
+
+  // 3. Not interested / polite decline
+  if (NOT_INTERESTED_RE.test(msg)) {
+    return {
+      agentReply: `No problem at all, ${first} — thanks for letting me know. I'll close out this inquiry so we don't bother you. Have a great day!`,
+      newToolEvents: [],
+      shouldEndCall: true,
+      endedReason: "customer-declined",
+    };
+  }
+
+  // 4. Pricing guard (Prompt rule: NEVER fabricate/quote prices)
+  if (PRICING_RE.test(msg)) {
+    const tools: ToolEvent[] = [];
+    if (!hasCheckedAvailability) {
+      tools.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
+    }
+    return {
+      agentReply: `Great question, ${first}. Because every property is different, I never guess or quote prices over the phone — our licensed technician does a free on-site ${service} and gives you an exact written quote. Would ${slotA} or ${slotB} work better for a quick 15-minute visit?`,
+      newToolEvents: tools,
+      shouldEndCall: false,
+    };
+  }
+
+  // 5. Slot confirmation -> Book Appointment tool!
+  if (hasCheckedAvailability && !hasBooked && CONFIRM_SLOT_RE.test(msg)) {
+    const pickedSecond = /(second|14:00|2:00|2 pm|afternoon)/i.test(msg);
+    const chosenSlot = pickedSecond ? slotB : slotA;
+    return {
+      agentReply: `Awesome — you're officially booked for ${chosenSlot} with ${params.tenantName}! I've synced your confirmation straight into our dispatch calendar. Anything else I can help with today, ${first}?`,
+      newToolEvents: [
+        {
+          name: "book_appointment",
+          args: { slot: chosenSlot, name: params.contactName },
+          result: `Confirmed ${chosenSlot}`,
+        },
+      ],
+      shouldEndCall: false,
+    };
+  }
+
+  // 6. Post-booking wrap-up
+  if (hasBooked) {
+    return {
+      agentReply: `Thanks so much, ${first}! We'll see you then. Have a wonderful day.`,
+      newToolEvents: [],
+      shouldEndCall: true,
+      endedReason: "appointment-confirmed-ended",
+    };
+  }
+
+  // 7. Callback requested
+  if (CALLBACK_RE.test(msg)) {
+    return {
+      agentReply: `Totally understand, ${first}. I'll note your file for a follow-up later during normal business hours. Thanks for your time!`,
+      newToolEvents: [],
+      shouldEndCall: true,
+      endedReason: "callback-requested",
+    };
+  }
+
+  // 8. Opening / Availability inquiry -> check_availability tool
+  if (GREET_OR_OPEN_RE.test(msg) || !hasCheckedAvailability) {
+    const tools: ToolEvent[] = [];
+    if (!hasCheckedAvailability) {
+      tools.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
+    }
+    return {
+      agentReply: `${params.config.disclosure} I checked our technician schedule for your free ${service}. We have ${slotA} or ${slotB} open — which of those works better for you?`,
+      newToolEvents: tools,
+      shouldEndCall: false,
+    };
+  }
+
+  return {
+    agentReply: `Got it, ${first}. Would you like me to lock in ${slotA} or ${slotB} for the free on-site ${service}?`,
+    newToolEvents: [],
+    shouldEndCall: false,
+  };
+}
+
 /* ───────────────────────────── Vapi (live provider) ──────────────────────── */
 
 export interface VapiEnvStatus {

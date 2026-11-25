@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { askWorkspaceCopilotAction } from "@/app/actions";
 import { Bot, Loader2, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 
@@ -28,9 +28,18 @@ export function CopilotDrawer({
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      text: `Connected to ${tenantName} read-only ledger. Ask me about mathematical reconciliation, FinOps cap usage, or quarantine counts (raw DNC PII is automatically redacted per ${complianceLaw}).`,
+      text: `Connected to ${tenantName} read-only ledger. Ask me about mathematical reconciliation, FinOps cap usage, unenriched backfill queue, voice calls, or quarantine counts (raw DNC PII is automatically redacted per ${complianceLaw}).`,
     },
   ]);
+
+  useEffect(() => {
+    setMessages([
+      {
+        role: "assistant",
+        text: `Connected to ${tenantName} read-only ledger. Ask me about mathematical reconciliation, FinOps cap usage, unenriched backfill queue, voice calls, or quarantine counts (raw DNC PII is automatically redacted per ${complianceLaw}).`,
+      },
+    ]);
+  }, [tenantName, complianceLaw]);
 
   if (!open) return null;
 
@@ -86,6 +95,8 @@ export function CopilotDrawer({
             {[
               "Is the reconciliation equation balanced?",
               "Show current FinOps spend vs cap",
+              "Any unenriched leads waiting for backfill?",
+              "Voice AI call outcomes",
               "Why are leads in quarantine?",
             ].map((q) => (
               <button

@@ -3,114 +3,80 @@
 [![Next.js](https://img.shields.io/badge/Next.js-15.1-black?style=flat&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.0-61DAFB?style=flat&logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![TailwindCSS](https://img.shields.io/badge/Tailwind-3.4-38B2AC?style=flat&logo=tailwind-css)](https://tailwindcss.com/)
-[![Prisma](https://img.shields.io/badge/Prisma-5.22-2D3748?style=flat&logo=prisma)](https://www.prisma.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16_Docker-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
+[![Playwright](https://img.shields.io/badge/E2E-Playwright-2EAD33?style=flat&logo=playwright)](https://playwright.dev/)
 [![Vapi AI](https://img.shields.io/badge/Voice_AI-Vapi.ai-00D2A0?style=flat)](https://vapi.ai)
 
-> **System 4** of the Senior CRM Automation & RevOps Systems Engineering Portfolio.  
-> An enterprise-grade RevOps operations portal built with a Figma-inspired visual design system. Provides multi-tenant lead hygiene, entity resolution, human-in-the-loop (HITL) quarantine resolution, real-time FinOps spend controls, and an integrated Voice AI qualification agent.
+> **System 4** of the Senior CRM Automation & Full-Stack Systems Engineering Portfolio.  
+> An enterprise B2B RevOps operations portal built for marketing agencies managing multi-client GoHighLevel sub-accounts across **US (TCPA)**, **AU (Spam Act 2003)**, and **UK (PECR/GDPR)**.
 
 ---
 
-## 🏛️ Executive Architecture & Core Highlights
+## 💼 The Business Problem & ROI (Why Agencies Pay For Lead Integrity Ops)
 
-### 1. Multi-Tenant Sub-Account Architecture
-* **Strict Cross-Tenant Isolation**: Instant context switching between **Apex Roofing TX** (United States • TCPA compliance • `+1 E.164`), **Summit Solar AU** (Australia • DNCR Spam Act • `+61 E.164`), and **Thames Heating UK** (United Kingdom • PECR/GDPR • `+44 E.164`).
-* **Session-Derived Tenancy**: Secured with encrypted `iron-session` cookies. No URL or client-provided body parameters can spoof workspace boundaries.
-* **Action-Level RBAC**: Role-based permissions (`OWNER`, `ADMIN`, `REVIEWER`, `VIEWER`) re-validated server-side on every mutation.
+Agencies spending \$10k–\$50k/month on Meta/Google ads and aged lead lists face four expensive production failures when dumping raw leads directly into GoHighLevel:
 
-### 2. Deterministic Entity Resolution & Ingestion Pipeline
-* **Multi-Tier Deduplication**: Tier 1 exact match (phone/email), Tier 2 normalized fuzzy match (address + surname).
-* **Shared Commercial Hub Isolation**: Detects broker and corporate lines with >3 distinct household names, isolating them into sub-clusters to prevent false deduplication.
-* **Stale Record Protection**: 5-year time-gap demotion flag prevents legacy customer records from overwriting active homeowner files.
-* **Compliance Overrides Revenue**: Immediate cluster-wide quarantine propagation upon receiving any TCPA/DNC opt-out request.
-
-### 3. Two-Sided Mathematical Reconciliation Invariant
-$$\text{Total Inbound} = \text{Clean Masters} + \text{Merged Duplicates} + \text{Quarantined Records} + \text{System Failures (0)}$$
-* Built-in reconciliation engine enforces that **every single ingested payload** is mathematically accounted for in real time across the ledger, analytics charts, and the AI Ops Copilot drawer.
-
-### 4. Pre-Flight FinOps Circuit Breaker
-* **Budget Telemetry**: Monitors external API spend (property enrichment, skip tracing) against monthly caps with custom threshold alerting (e.g. 80%).
-* **Autonomous Fallback**: When monthly budgets are exhausted or paused (e.g., Thames Heating UK demo), the platform automatically engages **Cache-Only Guard Mode** ($0.00 marginal spend).
-
-### 5. Integrated Voice AI Qualification Agent (`/voice`)
-* **Dual Telephony Mode**:
-  - **Live Vapi Telephony**: Integrates with [Vapi.ai](https://vapi.ai) REST endpoints (`POST /api/call`) and inbound webhook signatures (`/api/webhooks/vapi`).
-  - **Deterministic Showcase Simulator**: Allows zero-cost interactive testing of voice outreach, multi-turn dialogue, tool calls (`check_availability`, `book_appointment`), and compliance opt-out handling without carrier charges.
-* **Pre-Dial Compliance Gating**: Automatically enforces statutory calling windows (e.g., 8:00 AM – 9:00 PM local time per area code) and checks contact frequency before dialing.
+1. **Statutory Compliance Fines (\$500–\$2,200 per violation):** A homeowner submits a new web form while their spouse opted out last month on the same landline. Naive CRMs text the household anyway. **IntegrityOps enforces cluster-wide DNC quarantine and hard pre-dial voice blocks.**
+2. **Duplicate Ad & Enrichment Spend:** The same prospect submits 3 forms across Meta Ads, website chat, and CSV exports—triggering 3× paid property lookups (\$0.05–\$0.15 each) and causing multiple sales reps to awkwardly call the same homeowner. **IntegrityOps deduplicates deterministically across E.164 phone/email/address tiers and serves repeat lookups from a \$0.00 local property cache.**
+3. **Silent Data Fabrication & Runaway Bills:** When third-party enrichment APIs go down (503) or monthly budgets exhaust, brittle pipelines either crash (dropping paid leads) or silently invent fake numbers. **IntegrityOps degrades honestly: cache misses save cleanly as `UNENRICHED_DEGRADED` with `propertyEnrichment: null` (zero fabricated fields), sync safely to CRM so zero leads are lost, and queue into a 1-click Backfill Queue.**
+4. **Lost Dormant Revenue & Zero Auditability:** Unformatted phones, typos (`gmial.com`), and stale >2-year quotes bury \$100k+ in recoverable homeowner estimates. **IntegrityOps enforces a two-sided reconciliation invariant (`Inbound = Clean + Merged + Quarantined + 0 Failed`) and surfaces clean dormant estimates for 1-click reactivation.**
 
 ---
 
-## 📸 Platform Tour & Visual Interface
+## 🏛️ Engineering Architecture & Production Guarantees
 
-| Surface | Description | Highlights |
-| :--- | :--- | :--- |
-| **Balance & Ledger (`/dashboard`)** | Main agency operations overview matching Figma executive standard | 14-day stacked activity bars, FinOps donut gauge, 3-column sub-account switcher, real-time lead ledger. |
-| **Voice AI Agent (`/voice`)** | Voice outreach console & qualification auditor | Pre-dial calling window gatekeeper, live dialogue transcripts, autonomous tool call tracking, appointment booking. |
-| **Quarantine Queue (`/quarantine`)** | Human-in-the-Loop (HITL) exception triage | Side-by-side field diff viewer, one-click approved sync, split master, or permanent DNC blocking. |
-| **Ingestion Runs (`/runs`)** | Batch lineage and execution auditor | Full row-level lineage inspector displaying normalization, dedupe tiers, and FinOps cache savings. |
-| **Dormant Revival (`/reactivation`)** | Pipeline reactivation console | Dispatches dormant past leads (>180 days) directly into automated GoHighLevel nurture sequences. |
-| **RBAC & FinOps (`/settings`)** | Workspace governance & budget controls | Monthly cap configuration, Cache-Only circuit toggle, team management, and immutable audit log. |
+### 1. Strict Multi-Tenancy & Action-Level RBAC
+* **Zero IDOR / Session-Derived Tenancy:** Active workspace (`apex-roofing` US `$`, `summit-solar` AU `A$`, `thames-heating` UK `£`) is read strictly from encrypted `iron-session` cookies—never trusted from URL/body parameters.
+* **Server-Enforced RBAC:** Roles (`OWNER`, `ADMIN`, `REVIEWER`, `VIEWER`) are verified inside every Next.js Server Action. Hiding buttons is UX, not security—`VIEWER` mutations fail closed with `403 Forbidden`, and every mutation writes an immutable audit trail with `actorName (actorRole)`.
 
----
+### 2. Honest Property Enrichment Waterfall & Backfill Queue
+* **Layer 1 (`ENRICHED_CACHE` — \$0.00):** Reuses verified property specs from the tenant's local address/phone cache and records genuine cache savings.
+* **Layer 2 (`ENRICHED_LIVE` — \$0.05):** Calls the live property provider when under budget and healthy, caching the verified response.
+* **Layer 3 (`UNENRICHED_DEGRADED` — \$0.00, Zero Fabricated Data):** On a cache miss during a 503 API Outage, FinOps Pause, or Cap Guard, property fields stay explicitly `null` (never hallucinated, never falsely counted as "cache savings"). Leads still sync with `UNENRICHED_DEGRADED` status and can be backfilled in 1 click once the API recovers.
 
-## 🛠️ Environment Configuration (`.env`)
+### 3. Paginated, Searchable, Scale-Ready UI (React 19)
+* **Bounded-Height Tables + Pagination + Live Search:** Dashboard Lead Operations Ledger, Clean Masters/Dormant Revival, Quarantine Queue, and Voice History all use sticky-header bounded scroll containers (`max-h`) + page controls (`8 / 25 / 50` per page) + instant search, verified under a 30-lead scale batch so 1,000+ leads never break browser usability.
+* **React 19 `useOptimistic`:** Quarantine HITL actions (`Approve`, `Split`, `Permanent Block`) update instantaneously while server transactions settle.
 
-```env
-# Database Configuration (PostgreSQL on Vercel, SQLite in local development)
-DATABASE_URL="file:./dev.db"
+### 4. Interactive 2-Way Voice AI Qualification Console (`/voice`) & Real Vapi Webhook
+* **Live 2-Way Call Sandbox (YOU Play the Homeowner):** Talk directly to **Ash** (optional Web Speech API audio TTS) by typing custom homeowner replies or clicking realistic quick replies—testing Ash's pricing guard (never guesses quotes), `check_availability`, `book_appointment`, `transfer_to_human`, and **Mid-Call Consent Revocation** (`flag_do_not_call`).
+* **Pre-Dial DNC Block vs. Mid-Call Consent Revocation:** Already-opted-out leads are **hard-blocked before dialing (0s, \$0.00)** alongside statutory calling-window hours. Previously opted-in leads who revoke consent mid-call are immediately flagged DNC, quarantined across the household cluster, and hard-blocked from all future dials.
+* **Production Webhook Endpoints:**
+  - `POST /api/webhooks/n8n-ingest` — constant-time HMAC-SHA256 verified lead batch ingestion (`401` on tamper, `200`/`202` with reconciliation proof).
+  - `POST /api/webhooks/vapi` — secret/signature-verified Vapi real-time `tool-calls` and `end-of-call-report` handler.
 
-# Session Security Secret (32+ characters)
-SESSION_SECRET="complex_password_at_least_32_characters_long_for_security_123456"
-
-# App Public URL
-NEXT_PUBLIC_APP_URL="http://localhost:3005"
-
-# Webhook Shared Signing Secret (for verifying n8n HMAC-SHA256 signatures)
-WEBHOOK_DEFAULT_SECRET="whsec_enterprise_resilient_pipeline_secret_test_key"
-
-# Optional LLM Key for Fast Triage (Groq)
-GROQ_API_KEY=""
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Vapi Voice AI Configuration
-# ─────────────────────────────────────────────────────────────────────────────
-# When keys are supplied, live outbound calls can be initiated.
-# If PHONE_NUMBER_ID is omitted, it operates in Showcase Simulation Mode ($0.00 cost).
-VAPI_API_KEY=""
-VAPI_ASSISTANT_ID=""
-VAPI_PHONE_NUMBER_ID=""
-VAPI_WEBHOOK_SECRET="whsec_vapi_voice_ai_lead_qualification_audit"
-```
-
-For detailed assistant prompts, slot definitions, and first messages, refer to [`VAPI_CONFIGURATION_GUIDE.md`](VAPI_CONFIGURATION_GUIDE.md).
+### 5. PostgreSQL 16 (Docker) + Graceful Preview Fallback
+* Includes [`docker-compose.yml`](docker-compose.yml) (PostgreSQL 16 Alpine + healthcheck + persistent volume) and multi-stage [`Dockerfile`](Dockerfile).
+* Hydrates and writes through to PostgreSQL via Prisma (`WorkspaceSnapshot`, `Tenant`, `BudgetPolicy`, `AuditEvent`, `VoiceCallRecord`) when `DATABASE_URL` points to Postgres, and degrades cleanly to in-memory demo mode on zero-config preview deployments with live telemetry showing storage status.
 
 ---
 
-## 🚀 Quick Start (Local Development)
+## 🚀 Quick Start (Docker + PostgreSQL + Playwright E2E)
 
-### 1. Install Dependencies & Generate Prisma Client
+### 1. Start PostgreSQL 16 via Docker Compose
 ```bash
+cp .env.example .env
+docker compose up -d
 npm install
-npm run prisma:push
-npm run prisma:seed
+npx prisma db push
 ```
 
-### 2. Run Verification Suite (All 7 Quality Gates)
+### 2. Run Deterministic Unit & Invariant Gates (7/7 Suites)
 ```bash
 npm run verify
 ```
 
-### 3. Run Production Build
+### 3. Build, Start, and Run Playwright E2E Browser Suite
 ```bash
 npm run build
-npm run start
+npx next start -p 3005
+# In a second terminal:
+npm run test:e2e
 ```
-Open [http://localhost:3005](http://localhost:3005) in your browser.
 
 ---
 
 ## 📚 Portfolio Documentation
-* **Voice AI Setup Reference**: [`VAPI_CONFIGURATION_GUIDE.md`](VAPI_CONFIGURATION_GUIDE.md)
-* **Lead Contracts & Schemas**: [`CONTRACTS.md`](CONTRACTS.md)
-* **Technical Interview Defense & 3-Minute Script**: [`INTERVIEW_DEFENSE_GUIDE.md`](INTERVIEW_DEFENSE_GUIDE.md)
+* **Voice AI Setup Reference:** [`VAPI_CONFIGURATION_GUIDE.md`](VAPI_CONFIGURATION_GUIDE.md)
+* **Lead Contracts & Schemas:** [`CONTRACTS.md`](CONTRACTS.md)
+* **Technical Interview Defense & Demo Guide:** [`INTERVIEW_DEFENSE_GUIDE.md`](INTERVIEW_DEFENSE_GUIDE.md)

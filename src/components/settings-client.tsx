@@ -161,9 +161,9 @@ export function SettingsClient({
               Monthly FinOps Circuit Breaker Cap
             </h2>
             <p className="text-[11px] text-slate-400">
-              Current Spend: <strong>${(tenant.budget.currentSpendCents / 100).toFixed(2)}</strong> • Cache Saved:{" "}
+              Current Spend: <strong>{tenant.currencySymbol}{(tenant.budget.currentSpendCents / 100).toFixed(2)}</strong> • Cache Saved:{" "}
               <strong className="text-[#0D9488]">
-                ${(tenant.budget.cacheSavingsCents / 100).toFixed(2)}
+                {tenant.currencySymbol}{(tenant.budget.cacheSavingsCents / 100).toFixed(2)}
               </strong>{" "}
               (Requires OWNER or ADMIN role)
             </p>
@@ -226,24 +226,35 @@ export function SettingsClient({
             </button>
           </div>
           <p className="text-xs text-slate-500">
-            Endpoint: <code className="font-mono text-[#1649C7]">POST /api/webhooks/n8n-ingest?tenant={tenant.slug}</code>
+            Lead Ingest: <code className="font-mono text-[#1649C7]">POST /api/webhooks/n8n-ingest?tenant={tenant.slug}</code>
+          </p>
+          <p className="text-xs text-slate-500">
+            Voice AI Webhook: <code className="font-mono text-[#0D9488]">POST /api/webhooks/vapi?tenant={tenant.slug}</code>
           </p>
           <div className="p-3 rounded-xl bg-[#F4F7FC] border border-[#E4ECF6] font-mono text-xs text-[#172554] break-all">
             {tenant.webhookSecret}
+          </div>
+          <div className="pt-1 text-[11px] text-slate-500 flex items-center justify-between">
+            <span>Storage Backend:</span>
+            <span className="font-mono font-bold text-[#172554]">
+              {snapshot.persistence.mode === "POSTGRESQL_LIVE" ? "PostgreSQL 16 (Connected)" : "In-Memory Fallback"}
+            </span>
           </div>
         </div>
 
         <div className="soax-card p-6 space-y-3">
           <h3 className="text-sm font-bold text-[#172554]">Immutable Governance Audit Trail</h3>
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {tenant.audits.slice(0, 8).map((a) => (
+          <div className="space-y-2 max-h-56 overflow-y-auto pr-1" data-testid="audit-trail-list">
+            {tenant.audits.slice(0, 12).map((a) => (
               <div
                 key={a.id}
                 className="p-2.5 rounded-xl bg-[#F8FAFE] border border-[#EEF2F8] text-xs"
               >
-                <div className="flex items-center justify-between font-mono text-[11px]">
-                  <span className="font-bold text-[#1649C7]">{a.action}</span>
-                  <span className="text-slate-400">{a.actorRole}</span>
+                <div className="flex items-center justify-between font-mono text-[11px] gap-2">
+                  <span className="font-bold text-[#1649C7] truncate">{a.action}</span>
+                  <span className="text-slate-500 whitespace-nowrap">
+                    {a.actorName} ({a.actorRole})
+                  </span>
                 </div>
                 <p className="text-[11px] text-slate-600 mt-0.5">{a.detail}</p>
               </div>

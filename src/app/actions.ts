@@ -3,12 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentSession, mutateServerActionSession } from "@/lib/auth";
 import {
+  backfillStoreUnenrichedLeads,
   dispatchStoreReactivation,
   dispatchVoiceCallAction,
+  ensureStoreHydrated,
   getTenantSnapshot,
   getTenantVoiceState,
+  hangUpInteractiveVoiceCall,
   ingestStoreBatch,
+  persistTenantStateToPostgres,
   resolveStoreQuarantine,
+  sendInteractiveVoiceReply,
+  startInteractiveVoiceCall,
+  toggleStoreApiOutage,
   toggleStoreEnrichmentPause,
   updateStoreBudgetPolicy,
   updateVoiceClockMode,
@@ -79,6 +86,7 @@ export async function ingestSingleLeadFromUiAction(input: {
       };
     }
 
+    await ensureStoreHydrated();
     const snap = getTenantSnapshot(session.tenantSlug);
     const rawLead: RawInboundLead = {
       name: input.name,
@@ -102,6 +110,7 @@ export async function ingestSingleLeadFromUiAction(input: {
       `${session.userName} (UI Intake)`
     );
 
+    await persistTenantStateToPostgres(session.tenantSlug);
     revalidateAllSurfaces();
 
     const row = run.lineage[0];
@@ -197,6 +206,7 @@ export async function uploadCsvBatchAction(input: {
       };
     });
 
+    await ensureStoreHydrated();
     const snap = getTenantSnapshot(session.tenantSlug);
     const effectiveLocale = input.locale || snap.tenant.localeDefault;
 
@@ -209,6 +219,7 @@ export async function uploadCsvBatchAction(input: {
       `${session.userName} (CSV Upload)`
     );
 
+    await persistTenantStateToPostgres(session.tenantSlug);
     revalidateAllSurfaces();
 
     return {
@@ -232,6 +243,7 @@ export async function resolveQuarantineAction(
   }
 ): Promise<ActionResult> {
   try {
+    await ensureStoreHydrated();
     const session = await getCurrentSession();
     const res = resolveStoreQuarantine({
       slugOrId: session.tenantSlug,
@@ -245,6 +257,7 @@ export async function resolveQuarantineAction(
       notes: options?.notes,
     });
 
+    await persistTenantStateToPostgres(session.tenantSlug);
     revalidateAllSurfaces();
     return {
       ok: true,
@@ -264,6 +277,7 @@ export async function updateBudgetPolicyAction(
   warningThreshold: number
 ): Promise<ActionResult> {
   try {
+    await ensureStoreHydrated();
     const session = await getCurrentSession();
     const updated = updateStoreBudgetPolicy({
       slugOrId: session.tenantSlug,
@@ -273,6 +287,7 @@ export async function updateBudgetPolicyAction(
       warningThreshold,
     });
 
+    await persistTenantStateToPostgres(session.tenantSlug);
     revalidateAllSurfaces();
     return {
       ok: true,
@@ -287,17 +302,19 @@ export async function updateBudgetPolicyAction(
 export async function toggleEnrichmentPauseAction(): Promise<ActionResult<{ isPaused: boolean }>> {
   try {
     const session = await getCurrentSession();
+    await ensureStoreHydrated();
     const isPaused = toggleStoreEnrichmentPause({
       slugOrId: session.tenantSlug,
       role: session.role,
       actorName: session.userName,
     });
+    await persistTenantStateToPostgres(session.tenantSlug);
 
     revalidateAllSurfaces();
     return {
       ok: true,
       message: isPaused
-        ? "Cache-Only FinOps Guard activated ($0.00 paid lookups)."
+        ? "Cache-Only FinOps Guard activated ($0.00 paid lookups — cache misses queue honestly as Unenriched)."
         : "Live enrichment & AI triage resumed.",
       data: { isPaused },
     };
@@ -306,8 +323,53 @@ export async function toggleEnrichmentPauseAction(): Promise<ActionResult<{ isPa
   }
 }
 
+export async function toggleApiOutageAction(): Promise<ActionResult<{ isApiDown: boolean }>> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    const isApiDown = toggleStoreApiOutage({
+      slugOrId: session.tenantSlug,
+      role: session.role,
+      actorName: session.userName,
+    });
+    await persistTenantStateToPostgres(session.tenantSlug);
+    revalidateAllSurfaces();
+    return {
+      ok: true,
+      message: isApiDown
+        ? "Simulated 503 Property API Outage active — cache misses will save as UNENRICHED_DEGRADED (zero fabricated fields)."
+        : "External Property API restored — queued leads can now be backfilled.",
+      data: { isApiDown },
+    };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Failed to toggle API outage simulation" };
+  }
+}
+
+export async function backfillUnenrichedLeadsAction(): Promise<ActionResult> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    const res = backfillStoreUnenrichedLeads({
+      slugOrId: session.tenantSlug,
+      role: session.role,
+      actorName: session.userName,
+    });
+    await persistTenantStateToPostgres(session.tenantSlug);
+    revalidateAllSurfaces();
+    return {
+      ok: true,
+      message: `Backfilled ${res.backfilled} unenriched lead(s) ($${(res.costCents / 100).toFixed(2)} spend, ${res.remaining} remaining).`,
+      data: res,
+    };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Backfill failed" };
+  }
+}
+
 export async function dispatchReactivationAction(masterId: string): Promise<ActionResult> {
   try {
+    await ensureStoreHydrated();
     const session = await getCurrentSession();
     const master = dispatchStoreReactivation({
       slugOrId: session.tenantSlug,
@@ -316,6 +378,7 @@ export async function dispatchReactivationAction(masterId: string): Promise<Acti
       masterId,
     });
 
+    await persistTenantStateToPostgres(session.tenantSlug);
     revalidateAllSurfaces();
     return {
       ok: true,
@@ -328,9 +391,11 @@ export async function dispatchReactivationAction(masterId: string): Promise<Acti
 }
 
 export async function askWorkspaceCopilotAction(question: string): Promise<ActionResult<{ answer: string; tokensUsed: number }>> {
+  await ensureStoreHydrated();
   const session = await getCurrentSession();
   const snap = getTenantSnapshot(session.tenantSlug);
   const q = question.toLowerCase();
+  const curr = snap.tenant.currencySymbol;
 
   const { totalInbound, cleanMasters, mergedAliases, activeQuarantine, permanentQuarantine } =
     snap.reconciliation;
@@ -342,19 +407,48 @@ export async function askWorkspaceCopilotAction(question: string): Promise<Actio
     q.includes("quarantine") || q.includes("dnc") || q.includes("hub") || q.includes("blocked");
   const wantsFinops =
     q.includes("spend") || q.includes("budget") || q.includes("finops") || q.includes("cost") || q.includes("cap");
+  const wantsEnrichment =
+    q.includes("enrich") || q.includes("outage") || q.includes("backfill") || q.includes("cache") || q.includes("degrad");
+  const wantsVoice =
+    q.includes("voice") || q.includes("call") || q.includes("vapi") || q.includes("ash") || q.includes("book");
   const wantsReconciliation =
-    q.includes("reconcil") || q.includes("count") || q.includes("equation") || q.includes("inbound") || q.includes("summary") || (!wantsQuarantine && !wantsFinops);
+    q.includes("reconcil") ||
+    q.includes("count") ||
+    q.includes("equation") ||
+    q.includes("inbound") ||
+    q.includes("summary") ||
+    (!wantsQuarantine && !wantsFinops && !wantsEnrichment && !wantsVoice);
 
   const segments: string[] = [];
 
   if (wantsReconciliation) {
     segments.push(
-      `Reconciliation (${snap.tenant.name}, ${snap.tenant.phonePrefix}): ${totalInbound} Total Inbound = ${cleanMasters} Clean Masters + ${mergedAliases} Merged Duplicates + ${activeQuarantine + permanentQuarantine} Quarantined + 0 System Failures (100% verified, $${snap.pipelineValue.toLocaleString()} clean pipeline).`
+      `Reconciliation (${snap.tenant.name}, ${snap.tenant.phonePrefix}): ${totalInbound} Total Inbound = ${cleanMasters} Clean Masters + ${mergedAliases} Merged Duplicates + ${activeQuarantine + permanentQuarantine} Quarantined + 0 System Failures (100% verified, ${curr}${snap.pipelineValue.toLocaleString()} clean pipeline, ${curr}${snap.businessImpact.tcpaLiabilityProtected.toLocaleString()} compliance liability protected).`
     );
   }
   if (wantsFinops) {
     segments.push(
-      `FinOps Telemetry: $${spend} spent of $${cap} monthly cap ($${saved} saved via local payload cache). Circuit breaker: ${snap.tenant.budget.isPaused ? "PAUSED (Cache-Only $0.00)" : "ACTIVE"}.`
+      `FinOps Telemetry: ${curr}${spend} spent of ${curr}${cap} monthly cap (${curr}${saved} saved via genuine local cache hits). Circuit breaker: ${
+        snap.tenant.budget.isApiDown
+          ? "API 503 OUTAGE (Degraded Honest Mode)"
+          : snap.tenant.budget.isPaused
+            ? "PAUSED (Cache-Only $0.00)"
+            : "ACTIVE"
+      }.`
+    );
+  }
+  if (wantsEnrichment) {
+    segments.push(
+      `Enrichment Health: ${snap.businessImpact.unenrichedPendingCount} lead(s) currently UNENRICHED_DEGRADED (queued for backfill with zero fabricated specs) and ${snap.businessImpact.cacheEntriesCount} verified address(es) in local cache.`
+    );
+  }
+  if (wantsVoice) {
+    const calls = snap.tenant.voice?.calls || [];
+    const booked = calls.filter((c) => c.outcome === "APPOINTMENT_BOOKED").length;
+    const optedOut = calls.filter((c) => c.outcome === "OPTED_OUT").length;
+    const blocked = calls.filter((c) => c.status === "BLOCKED").length;
+    segments.push(
+      `Voice AI Ledger (${snap.tenant.voice?.config.agentName || "Ash"}): ${calls.length} total call event(s) — ${booked} booked, ${optedOut} mid-call DNC revocations, ${blocked} pre-dial gate blocks.`
     );
   }
   if (wantsQuarantine) {
@@ -384,16 +478,92 @@ export async function askWorkspaceCopilotAction(question: string): Promise<Actio
 
 export async function setVoiceClockModeAction(clockMode: ClockMode): Promise<ActionResult> {
   try {
+    await ensureStoreHydrated();
     const session = await getCurrentSession();
     const updated = updateVoiceClockMode({
       slugOrId: session.tenantSlug,
       role: session.role,
       clockMode,
     });
+    await persistTenantStateToPostgres(session.tenantSlug);
     revalidateAllSurfaces();
     return { ok: true, message: `Calling window policy set to ${updated}`, data: updated };
   } catch (err: unknown) {
     return { ok: false, message: err instanceof Error ? err.message : "Failed to set calling window policy" };
+  }
+}
+
+export async function startInteractiveVoiceCallAction(params: {
+  masterId?: string | null;
+  contactName: string;
+  phone: string;
+}): Promise<ActionResult> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    const result = startInteractiveVoiceCall({
+      slugOrId: session.tenantSlug,
+      role: session.role,
+      actorName: session.userName,
+      masterId: params.masterId,
+      contactName: params.contactName,
+      phone: params.phone,
+    });
+    await persistTenantStateToPostgres(session.tenantSlug, result.callRecord);
+    revalidateAllSurfaces();
+    if (!result.ok) {
+      return { ok: false, message: result.error || "Pre-dial compliance gate blocked call", data: result.callRecord };
+    }
+    return { ok: true, message: "Live interactive call connected — Ash is on the line. Reply as the customer below.", data: result.callRecord };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Failed to start interactive voice call" };
+  }
+}
+
+export async function sendInteractiveVoiceReplyAction(params: {
+  callId: string;
+  customerMessage: string;
+}): Promise<ActionResult> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    const result = sendInteractiveVoiceReply({
+      slugOrId: session.tenantSlug,
+      role: session.role,
+      actorName: session.userName,
+      callId: params.callId,
+      customerMessage: params.customerMessage,
+    });
+    await persistTenantStateToPostgres(session.tenantSlug, result.callRecord);
+    revalidateAllSurfaces();
+    return {
+      ok: true,
+      message:
+        result.callRecord.status === "COMPLETED"
+          ? `Call ended (${result.callRecord.outcome}).`
+          : "Ash replied.",
+      data: result.callRecord,
+    };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Failed to send voice reply" };
+  }
+}
+
+export async function hangUpInteractiveVoiceCallAction(callId: string): Promise<ActionResult> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    const result = hangUpInteractiveVoiceCall({
+      slugOrId: session.tenantSlug,
+      role: session.role,
+      actorName: session.userName,
+      callId,
+    });
+    await persistTenantStateToPostgres(session.tenantSlug, result.callRecord);
+    revalidateAllSurfaces();
+    return { ok: true, message: `Call settled (${result.callRecord.outcome}).`, data: result.callRecord };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Failed to end voice call" };
   }
 }
 
@@ -404,6 +574,7 @@ export async function triggerVoiceCallAction(params: {
   scenario?: VoiceScenario;
 }): Promise<ActionResult> {
   try {
+    await ensureStoreHydrated();
     const session = await getCurrentSession();
     const result = await dispatchVoiceCallAction({
       slugOrId: session.tenantSlug,
@@ -415,11 +586,12 @@ export async function triggerVoiceCallAction(params: {
       scenario: params.scenario,
     });
 
+    await persistTenantStateToPostgres(session.tenantSlug, result.callRecord);
     revalidateAllSurfaces();
     if (!result.ok) {
       return { ok: false, message: result.error || "Voice dial blocked", data: result.callRecord };
     }
-    return { ok: true, message: `Voice AI call executed (${result.callRecord?.outcome || "OK"})`, data: result.callRecord };
+    return { ok: true, message: `Automated QA replay executed (${result.callRecord?.outcome || "OK"})`, data: result.callRecord };
   } catch (err: unknown) {
     return { ok: false, message: err instanceof Error ? err.message : "Voice dispatch failed" };
   }

@@ -59,6 +59,8 @@ model BudgetPolicy {
   currentSpendCents  Int      @default(0)
   cacheSavingsCents  Int      @default(0)
   cacheOnlyOnCap     Boolean  @default(true)
+  isPaused           Boolean  @default(false)
+  isApiDown          Boolean  @default(false)
   warningThreshold   Int      @default(80) // 80%
   updatedAt          DateTime @updatedAt
 
@@ -123,6 +125,8 @@ model LeadMaster {
   triageConfidence  Float              @default(1.0) // 0.0 - 1.0
   intentCategory    String             @default("ROUTINE") // EMERGENCY_STORM | HIGH_INTENT | ROUTINE | UNCERTAIN
   estimatedValue    Float              @default(0)
+  enrichmentStatus  String             @default("ENRICHED_LIVE") // ENRICHED_LIVE | ENRICHED_CACHE | UNENRICHED_DEGRADED
+  propertyMeta      String?            // JSON string of verified property enrichment (null when degraded/unenriched)
   status            String             @default("CLEAN_MASTER") // CLEAN_MASTER | SYNCED_TO_GHL | QUARANTINED | DORMANT
   lastInteractionAt DateTime           @default(now())
   createdAt         DateTime           @default(now())
@@ -190,4 +194,33 @@ model EnrichmentLog {
 
   tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   run              IngestionRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
+
+// 4. Voice AI Call Audit Ledger & Durable State Persistence
+model VoiceCallRecord {
+  id             String   @id @default(cuid())
+  tenantSlug     String
+  direction      String   @default("OUTBOUND")
+  provider       String   @default("MOCK")
+  providerCallId String?
+  masterId       String?
+  contactName    String
+  phone          String?
+  status         String
+  outcome        String
+  durationSec    Int      @default(0)
+  costCents      Int      @default(0)
+  sentiment      String   @default("NEUTRAL")
+  appointmentAt  String?
+  optOutDetected Boolean  @default(false)
+  summary        String
+  transcriptJson String
+  toolEventsJson String
+  createdAt      DateTime @default(now())
+}
+
+model WorkspaceSnapshot {
+  key       String   @id // e.g. "global_store_v2"
+  payload   String   // Full serialized transactional workspace state
+  updatedAt DateTime @updatedAt
 }

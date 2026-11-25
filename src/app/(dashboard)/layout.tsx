@@ -1,5 +1,5 @@
 import { getCurrentSession } from "@/lib/auth";
-import { getTenantSnapshot, listWorkspaceSummaries } from "@/lib/store";
+import { ensureStoreHydrated, getTenantSnapshot, listWorkspaceSummaries } from "@/lib/store";
 import { ShellNavigation } from "@/components/shell-navigation";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +9,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  await ensureStoreHydrated();
   const session = await getCurrentSession();
   const snapshot = getTenantSnapshot(session.tenantSlug);
   const workspaces = listWorkspaceSummaries();

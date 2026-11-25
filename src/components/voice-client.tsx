@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { setVoiceClockModeAction, triggerVoiceCallAction } from "@/app/actions";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  hangUpInteractiveVoiceCallAction,
+  sendInteractiveVoiceReplyAction,
+  setVoiceClockModeAction,
+  startInteractiveVoiceCallAction,
+  triggerVoiceCallAction,
+} from "@/app/actions";
 import { UserRole } from "@/contracts/lead-contracts";
 import { CallRecord, ClockMode, VoiceScenario, VOICE_POLICY } from "@/lib/voice";
 import {
   PhoneCall,
-  ShieldCheck,
+  PhoneOff,
   ShieldAlert,
   Clock,
   Play,
@@ -14,17 +21,23 @@ import {
   AlertTriangle,
   FileText,
   Volume2,
+  VolumeX,
   Calendar,
   Sparkles,
-  DollarSign,
   Info,
   Key,
+  Send,
+  ChevronLeft,
+  ChevronRight,
+  UserCheck,
+  Bot,
 } from "lucide-react";
 
 interface VoiceClientProps {
   tenantName: string;
   tenantSlug: string;
   locale: "US" | "AU" | "UK";
+  currencySymbol: "$" | "A$" | "£";
   complianceLaw: string;
   currentRole: UserRole;
   envStatus: {
@@ -54,8 +67,8 @@ interface VoiceClientProps {
 
 export function VoiceClient({
   tenantName,
-  tenantSlug,
   locale,
+  currencySymbol,
   complianceLaw,
   currentRole,
   envStatus,
@@ -64,41 +77,149 @@ export function VoiceClient({
   calls,
   masters,
 }: VoiceClientProps) {
+  const router = useRouter();
+  const [mode, setMode] = useState<"INTERACTIVE" | "QA_REPLAY">("INTERACTIVE");
   const [clockMode, setClockMode] = useState<ClockMode>(initialClockMode);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+
   const [selectedScenario, setSelectedScenario] = useState<VoiceScenario>("INTERESTED_BOOKS");
-  const [targetContactName, setTargetContactName] = useState("");
-  const [targetPhone, setTargetPhone] = useState("");
-  const [targetMasterId, setTargetMasterId] = useState<string | null>(null);
+  const [targetContactName, setTargetContactName] = useState(masters[0]?.canonicalName || "");
+  const [targetPhone, setTargetPhone] = useState(masters[0]?.normalizedPhone || "");
+  const [targetMasterId, setTargetMasterId] = useState<string | null>(masters[0]?.id || null);
+
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(calls[0] || null);
-  const [statusMessage, setStatusMessage] = useState<{ text: string; tone: "positive" | "warning" | "danger" } | null>(null);
+  const [customerReply, setCustomerReply] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
+  const historyPageSize = 6;
+
+  const [statusMessage, setStatusMessage] = useState<{
+    text: string;
+    tone: "positive" | "warning" | "danger";
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const policy = VOICE_POLICY[locale];
+  const selectedMaster = masters.find((m) => m.id === targetMasterId) || null;
+  const isLiveCallActive = selectedCall?.status === "IN_PROGRESS";
+
+  // Keep selectedCall synchronized with fresh server props when router refreshes
+  useEffect(() => {
+    if (!selectedCall) {
+      if (calls[0]) setSelectedCall(calls[0]);
+      return;
+    }
+    const fresh = calls.find((c) => c.id === selectedCall.id);
+    if (fresh) setSelectedCall(fresh);
+  }, [calls, selectedCall]);
+
+  const speakAgentText = (text: string) => {
+    if (!audioEnabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.04;
+      window.speechSynthesis.speak(utter);
+    } catch {
+      // ignore TTS errors in headless environments
+    }
+  };
 
   const handleSelectLead = (leadId: string) => {
     const lead = masters.find((m) => m.id === leadId);
-    if (!lead) return;
+    if (!lead) {
+      setTargetMasterId(null);
+      return;
+    }
     setTargetMasterId(lead.id);
     setTargetContactName(lead.canonicalName);
     setTargetPhone(lead.normalizedPhone || "");
   };
 
-  const handleClockModeChange = (mode: ClockMode) => {
-    setClockMode(mode);
+  const handleClockModeChange = (nextMode: ClockMode) => {
+    setClockMode(nextMode);
     startTransition(async () => {
-      const res = await setVoiceClockModeAction(mode);
-      if (res.ok) {
-        setStatusMessage({ text: res.message, tone: "positive" });
-      } else {
-        setStatusMessage({ text: res.message, tone: "danger" });
-      }
+      const res = await setVoiceClockModeAction(nextMode);
+      setStatusMessage({
+        text: res.message,
+        tone: res.ok ? "positive" : "danger",
+      });
+      router.refresh();
     });
   };
 
-  const handleDispatchCall = (overridePhone?: string, overrideName?: string, overrideScenario?: VoiceScenario) => {
-    const contactName = overrideName || targetContactName.trim() || "Test Homeowner";
-    const phone = overridePhone || targetPhone.trim() || (locale === "AU" ? "+61 411 222 333" : locale === "UK" ? "+44 7700 900123" : "+1 512 555 0199");
-    const scenario = overrideScenario || selectedScenario;
+  const handleStartInteractiveCall = () => {
+    const contactName = targetContactName.trim() || "Test Homeowner";
+    const phone =
+      targetPhone.trim() ||
+      (locale === "AU" ? "+61 411 222 333" : locale === "UK" ? "+44 7700 900123" : "+1 512 555 0199");
+
+    setStatusMessage(null);
+    startTransition(async () => {
+      const res = await startInteractiveVoiceCallAction({
+        masterId: targetMasterId,
+        contactName,
+        phone,
+      });
+      const rec = res.data as CallRecord | undefined;
+      if (rec) setSelectedCall(rec);
+
+      if (res.ok && rec) {
+        setStatusMessage({ text: res.message, tone: "positive" });
+        const opener = rec.transcript[0]?.text;
+        if (opener) speakAgentText(opener);
+      } else {
+        setStatusMessage({ text: `Pre-Dial Gate Blocked: ${res.message}`, tone: "danger" });
+      }
+      router.refresh();
+    });
+  };
+
+  const handleSendCustomerReply = (overrideText?: string) => {
+    if (!selectedCall || selectedCall.status !== "IN_PROGRESS") return;
+    const text = (overrideText ?? customerReply).trim();
+    if (!text) return;
+
+    setCustomerReply("");
+    setStatusMessage(null);
+    startTransition(async () => {
+      const res = await sendInteractiveVoiceReplyAction({
+        callId: selectedCall.id,
+        customerMessage: text,
+      });
+      const rec = res.data as CallRecord | undefined;
+      if (rec) {
+        setSelectedCall(rec);
+        const lastAgentTurn = [...rec.transcript].reverse().find((t) => t.role === "agent");
+        if (lastAgentTurn) speakAgentText(lastAgentTurn.text);
+      }
+      setStatusMessage({
+        text: res.message,
+        tone: res.ok
+          ? rec?.optOutDetected
+            ? "warning"
+            : "positive"
+          : "danger",
+      });
+      router.refresh();
+    });
+  };
+
+  const handleHangUp = () => {
+    if (!selectedCall || selectedCall.status !== "IN_PROGRESS") return;
+    startTransition(async () => {
+      const res = await hangUpInteractiveVoiceCallAction(selectedCall.id);
+      const rec = res.data as CallRecord | undefined;
+      if (rec) setSelectedCall(rec);
+      setStatusMessage({ text: res.message, tone: res.ok ? "positive" : "danger" });
+      router.refresh();
+    });
+  };
+
+  const handleDispatchQaReplay = () => {
+    const contactName = targetContactName.trim() || "Test Homeowner";
+    const phone =
+      targetPhone.trim() ||
+      (locale === "AU" ? "+61 411 222 333" : locale === "UK" ? "+44 7700 900123" : "+1 512 555 0199");
 
     setStatusMessage(null);
     startTransition(async () => {
@@ -106,123 +227,187 @@ export function VoiceClient({
         masterId: targetMasterId,
         contactName,
         phone,
-        scenario,
+        scenario: selectedScenario,
       });
 
-      if (res.ok) {
-        setStatusMessage({ text: res.message, tone: "positive" });
-        if (res.data) setSelectedCall(res.data as CallRecord);
-      } else {
-        setStatusMessage({ text: `Blocked: ${res.message}`, tone: "danger" });
-        if (res.data) setSelectedCall(res.data as CallRecord);
-      }
+      const rec = res.data as CallRecord | undefined;
+      if (rec) setSelectedCall(rec);
+      setStatusMessage({
+        text: res.ok ? res.message : `Blocked: ${res.message}`,
+        tone: res.ok ? "positive" : "danger",
+      });
+      router.refresh();
     });
   };
 
+  const historyTotalPages = Math.max(1, Math.ceil(calls.length / historyPageSize));
+  const safeHistoryPage = Math.min(historyPage, historyTotalPages);
+  const pagedCalls = calls.slice(
+    (safeHistoryPage - 1) * historyPageSize,
+    safeHistoryPage * historyPageSize
+  );
+
   return (
-    <div className="space-y-6">
-      {/* Top Banner: Status & API Key Notice */}
+    <div className="p-6 xl:p-8 max-w-6xl mx-auto space-y-6">
+      {/* Top Banner: Status & Audio Toggle */}
       <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
           <div className="w-11 h-11 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-600 flex-shrink-0">
             <PhoneCall className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">Voice AI Agent Console</h2>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                envStatus.configured ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"
-              }`}>
-                {envStatus.configured ? "Vapi Live Connected" : "Deterministic Simulator"}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">
+                Voice AI Qualification Console — {tenantName}
+              </h2>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                  envStatus.configured
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-sky-100 text-sky-800"
+                }`}
+              >
+                {envStatus.configured ? "Vapi Live Connected" : "Interactive 2-Way Simulator"}
               </span>
             </div>
             <p className="text-[13px] text-slate-500 mt-0.5">
-              Automated voice outreach, pre-dial compliance gating ({complianceLaw}), and real-time appointment qualification.
+              Live 2-way outbound qualification calls (not voicemail blasts) with deterministic pre-dial {complianceLaw} gating and autonomous calendar booking.
             </p>
           </div>
         </div>
 
-        {/* Live Key Status / Simulation Toggle indicator */}
-        <div className="flex items-center gap-3">
-          <div className="text-right text-xs">
-            <div className="text-slate-400 font-medium">Provider Engine</div>
-            <div className="font-semibold text-slate-700">
-              {envStatus.configured ? "Vapi.ai Outbound API" : "Interactive Mock Telephony"}
-            </div>
-          </div>
-          <div className={`p-2.5 rounded-xl border ${envStatus.configured ? "bg-emerald-50 border-emerald-200 text-emerald-600" : "bg-slate-50 border-slate-200 text-slate-500"}`}>
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setAudioEnabled((v) => !v)}
+            data-testid="voice-audio-toggle"
+            className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition ${
+              audioEnabled
+                ? "bg-teal-50 border-teal-200 text-teal-700"
+                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            {audioEnabled ? "Browser Audio ON" : "Browser Audio OFF"}
+          </button>
+          <div
+            className={`p-2.5 rounded-xl border ${
+              envStatus.configured
+                ? "bg-emerald-50 border-emerald-200 text-emerald-600"
+                : "bg-slate-50 border-slate-200 text-slate-500"
+            }`}
+            title={
+              envStatus.configured
+                ? "Vapi live telephony configured"
+                : "Vapi API + Assistant loaded; zero-cost interactive telephony sandbox active"
+            }
+          >
             <Key className="w-4 h-4" />
           </div>
         </div>
       </div>
 
-      {/* Environment Key Alert if not configured */}
-      {!envStatus.configured && (
-        <div className="bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-100 rounded-2xl p-4 text-xs text-sky-900 flex items-start gap-3">
-          <Info className="w-4 h-4 text-sky-600 flex-shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="font-bold flex items-center gap-2">
-              <span>Deterministic Simulation & Portfolio Showcase Mode</span>
-              {process.env.NEXT_PUBLIC_VAPI_AUTHENTICATED || (
-                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                  Vapi Account & Assistant Connected
-                </span>
-              )}
-            </div>
-            <p className="text-sky-800/90 leading-relaxed">
-              Your <strong>VAPI_API_KEY</strong> and <strong>VAPI_ASSISTANT_ID</strong> are loaded. Because outbound PSTN calling numbers require a paid carrier subscription, this console runs in <strong>Interactive Zero-Cost Telephony Mode</strong>. You can demo full conversational turns, autonomous scheduling, DNC enforcement, and FinOps budgeting with zero ongoing billable charges.
-            </p>
+      {/* Crystal-Clear Explanation of How Interactive Voice + Pre-Dial vs Mid-Call DNC Works */}
+      <div className="bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-100 rounded-2xl p-4 text-xs text-sky-900 flex items-start gap-3">
+        <Info className="w-4 h-4 text-sky-600 flex-shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <div className="font-bold flex items-center gap-2 flex-wrap">
+            <span>How This Works: Interactive 2-Way Call Sandbox + Real Vapi Webhook Endpoint</span>
+            <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+              POST /api/webhooks/vapi Ready
+            </span>
           </div>
+          <p className="text-sky-800/90 leading-relaxed">
+            <strong>In Interactive Mode (below), YOU act as the homeowner</strong> while <strong>{agentConfig.agentName}</strong> runs the real compliance &amp; tool-calling engine. Already-opted-out leads are <strong>hard-blocked BEFORE dialing (0s, {currencySymbol}0.00)</strong>. Only previously opted-in leads can be dialed — and if a homeowner revokes consent <em>mid-call</em> (&ldquo;stop calling me&rdquo;), {agentConfig.agentName} fires <code className="bg-white/80 px-1 rounded font-mono">flag_do_not_call</code>, ends the call, and permanently blocks all future dials.
+          </p>
         </div>
-      )}
+      </div>
 
-      {/* Status toast message */}
+      {/* Status Toast */}
       {statusMessage && (
-        <div className={`p-4 rounded-xl text-xs font-semibold flex items-center justify-between border ${
-          statusMessage.tone === "positive"
-            ? "bg-emerald-50 text-emerald-900 border-emerald-200"
-            : statusMessage.tone === "warning"
-              ? "bg-amber-50 text-amber-900 border-amber-200"
-              : "bg-rose-50 text-rose-900 border-rose-200"
-        }`}>
+        <div
+          data-testid="voice-status-banner"
+          className={`p-4 rounded-xl text-xs font-semibold flex items-center justify-between border ${
+            statusMessage.tone === "positive"
+              ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+              : statusMessage.tone === "warning"
+                ? "bg-amber-50 text-amber-900 border-amber-200"
+                : "bg-rose-50 text-rose-900 border-rose-200"
+          }`}
+        >
           <span>{statusMessage.text}</span>
-          <button onClick={() => setStatusMessage(null)} className="text-slate-400 hover:text-slate-700 ml-4">✕</button>
+          <button
+            type="button"
+            onClick={() => setStatusMessage(null)}
+            className="text-slate-400 hover:text-slate-700 ml-4"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Main Grid: Dialer Console & Transcripts */}
+      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left Column: Pre-Dial Controls & Lead Picker (5 cols) */}
+        {/* Left Column: Pre-Dial Gate & Mode Selector (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
-          
-          {/* Dialer Card */}
           <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
-                <Play className="w-4 h-4 text-teal-500 fill-teal-500" /> Dispatch Voice Outreach
-              </h3>
-              <span className="text-[11px] font-mono text-slate-400">12¢ / min</span>
+            {/* Mode Switcher Tabs */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
+              <button
+                type="button"
+                data-testid="voice-mode-interactive"
+                onClick={() => setMode("INTERACTIVE")}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                  mode === "INTERACTIVE"
+                    ? "bg-white text-[#172554] shadow-xs"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-teal-600" /> You Play Customer
+              </button>
+              <button
+                type="button"
+                data-testid="voice-mode-qa"
+                onClick={() => setMode("QA_REPLAY")}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                  mode === "QA_REPLAY"
+                    ? "bg-white text-[#172554] shadow-xs"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Bot className="w-3.5 h-3.5 text-[#1649C7]" /> Automated QA Replay
+              </button>
             </div>
 
-            {/* Quick Select from Active Leads */}
+            {/* Select Workspace Lead */}
             <div>
               <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1.5">
-                Select Workspace Lead
+                Target Workspace Lead
               </label>
               <select
                 aria-label="Select Workspace Lead"
+                data-testid="voice-lead-select"
                 value={targetMasterId || ""}
                 onChange={(e) => handleSelectLead(e.target.value)}
-                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
                 <option value="">-- Choose Lead or Type Custom Below --</option>
                 {masters.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.canonicalName} ({m.normalizedPhone || "No Phone"}) {m.isTcpaOptedOut ? "[OPTED OUT]" : ""}
+                    {m.isTcpaOptedOut ? "🚫 [PRE-DIAL DNC BLOCKED] " : "✓ "}
+                    {m.canonicalName} ({m.normalizedPhone || "No Phone"})
                   </option>
                 ))}
               </select>
+
+              {selectedMaster?.isTcpaOptedOut && (
+                <p
+                  data-testid="voice-dnc-warning"
+                  className="mt-2 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"
+                >
+                  This contact already revoked consent. Attempting to dial will trigger a hard Pre-Dial DNC Block (0s, {currencySymbol}0.00).
+                </p>
+              )}
             </div>
 
             {/* Manual Inputs */}
@@ -245,7 +430,13 @@ export function VoiceClient({
                 </label>
                 <input
                   type="text"
-                  placeholder={locale === "AU" ? "+61 411 222 333" : locale === "UK" ? "+44 7700 900123" : "+1 512 555 0199"}
+                  placeholder={
+                    locale === "AU"
+                      ? "+61 411 222 333"
+                      : locale === "UK"
+                        ? "+44 7700 900123"
+                        : "+1 512 555 0199"
+                  }
                   value={targetPhone}
                   onChange={(e) => setTargetPhone(e.target.value)}
                   className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
@@ -253,42 +444,70 @@ export function VoiceClient({
               </div>
             </div>
 
-            {/* Simulation Scenarios */}
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1.5">
-                Simulation Outcome Scenario
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: "INTERESTED_BOOKS", label: "Interested & Books", icon: Calendar, tone: "text-emerald-600 bg-emerald-50 border-emerald-200" },
-                  { id: "OPT_OUT", label: "DNC / Opt-Out", icon: ShieldAlert, tone: "text-rose-600 bg-rose-50 border-rose-200" },
-                  { id: "NOT_INTERESTED", label: "Not Interested", icon: AlertTriangle, tone: "text-amber-600 bg-amber-50 border-amber-200" },
-                  { id: "VOICEMAIL", label: "Voicemail Left", icon: Volume2, tone: "text-indigo-600 bg-indigo-50 border-indigo-200" },
-                ].map((sc) => {
-                  const Icon = sc.icon;
-                  const isSel = selectedScenario === sc.id;
-                  return (
-                    <button
-                      key={sc.id}
-                      type="button"
-                      onClick={() => setSelectedScenario(sc.id as VoiceScenario)}
-                      className={`text-left p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center gap-2 ${
-                        isSel ? `${sc.tone} ring-2 ring-teal-500` : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="truncate">{sc.label}</span>
-                    </button>
-                  );
-                })}
+            {/* Mode-Specific Controls */}
+            {mode === "QA_REPLAY" && (
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                  Automated Regression Scenario (AI Plays Both Sides)
+                </label>
+                <p className="text-[11px] text-slate-400 mb-2">
+                  Used to verify webhook settlement &amp; mid-call compliance revocations automatically.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    {
+                      id: "INTERESTED_BOOKS",
+                      label: "Books Inspection",
+                      icon: Calendar,
+                      tone: "text-emerald-600 bg-emerald-50 border-emerald-200",
+                    },
+                    {
+                      id: "OPT_OUT",
+                      label: "Mid-Call Opt-Out",
+                      icon: ShieldAlert,
+                      tone: "text-rose-600 bg-rose-50 border-rose-200",
+                    },
+                    {
+                      id: "NOT_INTERESTED",
+                      label: "Declines Offer",
+                      icon: AlertTriangle,
+                      tone: "text-amber-600 bg-amber-50 border-amber-200",
+                    },
+                    {
+                      id: "VOICEMAIL",
+                      label: "Voicemail Left",
+                      icon: Volume2,
+                      tone: "text-indigo-600 bg-indigo-50 border-indigo-200",
+                    },
+                  ].map((sc) => {
+                    const Icon = sc.icon;
+                    const isSel = selectedScenario === sc.id;
+                    return (
+                      <button
+                        key={sc.id}
+                        type="button"
+                        data-testid={`qa-scenario-${sc.id}`}
+                        onClick={() => setSelectedScenario(sc.id as VoiceScenario)}
+                        className={`text-left p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center gap-2 ${
+                          isSel
+                            ? `${sc.tone} ring-2 ring-teal-500`
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="truncate">{sc.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Calling Hours Policy Override (for compliance testing) */}
+            {/* Pre-Dial Calling Window Policy Gate */}
             <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-500" /> Calling Window Gate
+                  <Clock className="w-3.5 h-3.5 text-slate-500" /> Pre-Dial Calling Window Gate
                 </span>
                 <span className="font-mono text-[11px] text-slate-500">{policy.timeZone}</span>
               </div>
@@ -296,117 +515,170 @@ export function VoiceClient({
                 Statutory window: <span className="font-medium text-slate-700">{policy.label}</span>
               </p>
               <div className="grid grid-cols-3 gap-1 pt-1">
-                {(["FORCE_OPEN", "LIVE", "FORCE_CLOSED"] as ClockMode[]).map((mode) => (
+                {(["FORCE_OPEN", "LIVE", "FORCE_CLOSED"] as ClockMode[]).map((cm) => (
                   <button
-                    key={mode}
+                    key={cm}
                     type="button"
-                    onClick={() => handleClockModeChange(mode)}
+                    data-testid={`clock-mode-${cm}`}
+                    onClick={() => handleClockModeChange(cm)}
                     className={`py-1 px-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
-                      clockMode === mode
+                      clockMode === cm
                         ? "bg-teal-500 text-white border-teal-600 shadow-xs"
                         : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
                     }`}
                   >
-                    {mode === "FORCE_OPEN" ? "Permitted" : mode === "FORCE_CLOSED" ? "After Hours" : "Live Clock"}
+                    {cm === "FORCE_OPEN" ? "Permitted" : cm === "FORCE_CLOSED" ? "After Hours" : "Live Clock"}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Launch Dial Button */}
-            <button
-              type="button"
-              disabled={isPending || currentRole === "VIEWER"}
-              onClick={() => handleDispatchCall()}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-[#00D2A0] to-[#0A4D68] text-white font-bold text-xs uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isPending ? (
-                <>Processing Voice Call...</>
-              ) : (
-                <>
-                  <PhoneCall className="w-4 h-4" /> Trigger Voice Outreach
-                </>
-              )}
-            </button>
+            {/* Launch Button */}
+            {mode === "INTERACTIVE" ? (
+              <button
+                type="button"
+                disabled={isPending || currentRole === "VIEWER"}
+                onClick={handleStartInteractiveCall}
+                data-testid="start-interactive-call-btn"
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-[#00D2A0] to-[#0A4D68] text-white font-bold text-xs uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <PhoneCall className="w-4 h-4" />
+                {isPending ? "Checking Pre-Dial Gate..." : "Start Live Call (You Play Customer)"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isPending || currentRole === "VIEWER"}
+                onClick={handleDispatchQaReplay}
+                data-testid="run-qa-replay-btn"
+                className="w-full py-3 px-4 rounded-xl bg-[#1649C7] hover:bg-[#1E5EFF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                {isPending ? "Running Automated Replay..." : "Run Automated QA Replay"}
+              </button>
+            )}
+
             {currentRole === "VIEWER" && (
               <p className="text-[11px] text-amber-600 text-center font-medium">
-                403 Read-Only: Switch role to Reviewer or Admin to place calls.
+                403 Read-Only: Switch role to Reviewer or Admin to initiate calls.
               </p>
             )}
           </div>
 
-          {/* Agent Persona Specifications */}
+          {/* Agent Blueprint */}
           <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-3 text-xs">
             <h4 className="font-bold text-slate-800 flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-teal-500" /> Assistant Blueprint
+              <Sparkles className="w-3.5 h-3.5 text-teal-500" /> Vapi Assistant Blueprint
             </h4>
             <div className="grid grid-cols-2 gap-2 text-slate-600">
-              <div><span className="text-slate-400">Agent:</span> {agentConfig.agentName}</div>
-              <div><span className="text-slate-400">Model:</span> {agentConfig.model}</div>
-              <div className="col-span-2"><span className="text-slate-400">Voice:</span> {agentConfig.voiceLabel}</div>
-              <div className="col-span-2"><span className="text-slate-400">Transfer Line:</span> {agentConfig.transferNumber}</div>
+              <div>
+                <span className="text-slate-400">Agent:</span>{" "}
+                <strong className="text-slate-800">{agentConfig.agentName}</strong>
+              </div>
+              <div>
+                <span className="text-slate-400">Model:</span> {agentConfig.model}
+              </div>
+              <div className="col-span-2">
+                <span className="text-slate-400">Voice:</span> {agentConfig.voiceLabel}
+              </div>
+              <div className="col-span-2">
+                <span className="text-slate-400">Warm Transfer:</span> {agentConfig.transferNumber}
+              </div>
             </div>
             <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-[11px] text-slate-600">
-              <span className="font-semibold text-slate-800">Mandatory Disclosure:</span> &ldquo;{agentConfig.disclosure}&rdquo;
+              <span className="font-semibold text-slate-800">Mandatory AI Disclosure:</span> &ldquo;
+              {agentConfig.disclosure}&rdquo;
             </div>
           </div>
         </div>
 
-        {/* Right Column: Call Ledger & Multi-Turn Transcript View (7 cols) */}
+        {/* Right Column: Live Interactive Call Stage + Paginated History (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          
-          {/* Active / Selected Call Detail Panel */}
           {selectedCall ? (
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-5">
-              <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              {/* Call Header */}
+              <div className="flex items-start justify-between border-b border-slate-100 pb-4 gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[16px] font-bold text-slate-900">{selectedCall.contactName}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      selectedCall.outcome === "APPOINTMENT_BOOKED"
-                        ? "bg-emerald-100 text-emerald-800"
-                        : selectedCall.outcome === "OPTED_OUT"
-                          ? "bg-rose-100 text-rose-800"
-                          : selectedCall.outcome === "BLOCKED_BY_GATE"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-slate-100 text-slate-800"
-                    }`}>
-                      {selectedCall.outcome}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[16px] font-bold text-slate-900">
+                      {selectedCall.contactName}
+                    </span>
+                    <span
+                      data-testid="selected-call-outcome"
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        selectedCall.status === "IN_PROGRESS"
+                          ? "bg-teal-100 text-teal-800 animate-pulse"
+                          : selectedCall.outcome === "APPOINTMENT_BOOKED"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : selectedCall.outcome === "OPTED_OUT"
+                              ? "bg-rose-100 text-rose-800"
+                              : selectedCall.outcome === "BLOCKED_BY_GATE"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-slate-100 text-slate-800"
+                      }`}
+                    >
+                      {selectedCall.status === "IN_PROGRESS" ? "LIVE CALL ACTIVE" : selectedCall.outcome}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {selectedCall.phone} • {selectedCall.startedAt ? new Date(selectedCall.startedAt).toLocaleTimeString() : "Pending"} • Duration: {selectedCall.durationSec}s • Cost: ${(selectedCall.costCents / 100).toFixed(2)}
+                    {selectedCall.phone} • Duration: {selectedCall.durationSec}s • Cost:{" "}
+                    {currencySymbol}
+                    {(selectedCall.costCents / 100).toFixed(2)}
                   </p>
                 </div>
 
-                <div className="text-right">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sentiment</div>
-                  <div className={`text-xs font-bold ${
-                    selectedCall.sentiment === "POSITIVE"
-                      ? "text-emerald-600"
-                      : selectedCall.sentiment === "NEGATIVE"
-                        ? "text-rose-600"
-                        : "text-slate-600"
-                  }`}>
-                    {selectedCall.sentiment}
+                {isLiveCallActive ? (
+                  <button
+                    type="button"
+                    onClick={handleHangUp}
+                    disabled={isPending}
+                    data-testid="hangup-call-btn"
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 transition"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" /> End Call
+                  </button>
+                ) : (
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Sentiment
+                    </div>
+                    <div
+                      className={`text-xs font-bold ${
+                        selectedCall.sentiment === "POSITIVE"
+                          ? "text-emerald-600"
+                          : selectedCall.sentiment === "NEGATIVE"
+                            ? "text-rose-600"
+                            : "text-slate-600"
+                      }`}
+                    >
+                      {selectedCall.sentiment}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* Summary & Analysis */}
+              {/* Synthesis Banner */}
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5 text-xs">
                 <div className="font-bold text-slate-700 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-teal-600" /> Call Synthesis & Disposition
+                  <FileText className="w-3.5 h-3.5 text-teal-600" /> Call Synthesis &amp; Disposition
                 </div>
                 <p className="text-slate-600 leading-relaxed">{selectedCall.summary}</p>
                 {selectedCall.appointmentAt && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-semibold">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Booked Slot: {selectedCall.appointmentAt}
+                  <div
+                    data-testid="booked-slot-badge"
+                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-semibold"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Booked Slot:{" "}
+                    {selectedCall.appointmentAt}
                   </div>
                 )}
                 {selectedCall.optOutDetected && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 text-xs font-semibold">
-                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600" /> DNC Enforced: Household cluster quarantined
+                  <div
+                    data-testid="dnc-enforced-badge"
+                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 text-xs font-semibold"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600" /> DNC Enforced: Household
+                    cluster quarantined &amp; future calls blocked
                   </div>
                 )}
               </div>
@@ -416,10 +688,13 @@ export function VoiceClient({
                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">
                   Dialogue Transcript ({selectedCall.transcript.length} turns)
                 </h4>
-                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                <div
+                  data-testid="voice-transcript-box"
+                  className="space-y-2 max-h-[280px] overflow-y-auto pr-1"
+                >
                   {selectedCall.transcript.length === 0 ? (
                     <div className="text-center py-8 text-xs text-slate-400">
-                      No transcript turns recorded (Call status: {selectedCall.status})
+                      No transcript turns recorded (Blocked pre-dial — {selectedCall.status})
                     </div>
                   ) : (
                     selectedCall.transcript.map((turn, i) => (
@@ -433,7 +708,9 @@ export function VoiceClient({
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-[11px] uppercase tracking-wider text-slate-500">
-                            {turn.role === "agent" ? `AI (${agentConfig.agentName})` : selectedCall.contactName}
+                            {turn.role === "agent"
+                              ? `AI (${agentConfig.agentName})`
+                              : `${selectedCall.contactName} (You)`}
                           </span>
                           <span className="font-mono text-[10px] text-slate-400">{turn.atSec}s</span>
                         </div>
@@ -444,15 +721,81 @@ export function VoiceClient({
                 </div>
               </div>
 
-              {/* Executed Tools */}
+              {/* Interactive Customer Reply Controls (ONLY visible while LIVE call is active!) */}
+              {isLiveCallActive && (
+                <div
+                  data-testid="interactive-reply-panel"
+                  className="p-4 rounded-xl bg-[#F4F9FF] border border-[#D7E6FA] space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#172554]">
+                      Respond as {selectedCall.contactName} (Homeowner):
+                    </span>
+                    <span className="text-[10px] font-mono text-teal-700 bg-teal-100 px-2 py-0.5 rounded-full">
+                      2-Way Live Turn
+                    </span>
+                  </div>
+
+                  {/* 1-Click Realistic Homeowner Quick Replies */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { label: "Yes, what times are open?", text: "Yes, I have a minute. What times do you have available?" },
+                      { label: "How much does it cost?", text: "Wait, how much does a new roof cost?" },
+                      { label: "First slot works, book it", text: "The first slot works for me, please book it." },
+                      { label: "Stop calling me (Test DNC)", text: "Please stop calling me and remove my number from your list." },
+                    ].map((chip) => (
+                      <button
+                        key={chip.label}
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => handleSendCustomerReply(chip.text)}
+                        className="px-2.5 py-1 rounded-full bg-white border border-[#DCE6F7] hover:border-[#1649C7] text-[11px] font-semibold text-[#1649C7] transition"
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom Customer Text Input */}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSendCustomerReply();
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={customerReply}
+                      onChange={(e) => setCustomerReply(e.target.value)}
+                      placeholder="Type anything a real homeowner would say..."
+                      data-testid="voice-customer-input"
+                      className="flex-1 text-xs bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isPending || !customerReply.trim()}
+                      data-testid="voice-send-reply-btn"
+                      className="px-4 py-2.5 rounded-xl bg-[#1649C7] hover:bg-[#1E5EFF] disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Reply
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Executed Autonomous Tool Calls */}
               {selectedCall.toolEvents.length > 0 && (
                 <div>
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                     Autonomous Tool Invocations
                   </h4>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2" data-testid="voice-tool-events">
                     {selectedCall.toolEvents.map((t, idx) => (
-                      <span key={idx} className="px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-mono">
+                      <span
+                        key={idx}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-mono"
+                      >
                         {t.name}({JSON.stringify(t.args)})
                       </span>
                     ))}
@@ -462,18 +805,50 @@ export function VoiceClient({
             </div>
           ) : (
             <div className="bg-white rounded-2xl p-12 border border-slate-100 text-center text-slate-400 text-xs">
-              Select or place a call on the left to inspect real-time dialogue and analysis.
+              Click <strong>Start Live Call (You Play Customer)</strong> on the left to talk directly with {agentConfig.agentName} and test real-time booking &amp; DNC compliance.
             </div>
           )}
 
-          {/* Historical Calls Ledger */}
+          {/* Paginated Voice Engagement History */}
           <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] space-y-4">
-            <h3 className="text-[15px] font-bold text-slate-800">Voice Engagement History</h3>
-            <div className="divide-y divide-slate-100 max-h-[320px] overflow-y-auto">
-              {calls.length === 0 ? (
-                <div className="text-center py-6 text-xs text-slate-400">No outbound calls placed in this workspace yet.</div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-[15px] font-bold text-slate-800">
+                Voice Engagement History ({calls.length})
+              </h3>
+              {historyTotalPages > 1 && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    type="button"
+                    disabled={safeHistoryPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    className="p-1 rounded border border-slate-200 disabled:opacity-40"
+                    aria-label="Previous call history page"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {safeHistoryPage}/{historyTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeHistoryPage >= historyTotalPages}
+                    onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
+                    className="p-1 rounded border border-slate-200 disabled:opacity-40"
+                    aria-label="Next call history page"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="divide-y divide-slate-100 max-h-[260px] overflow-y-auto">
+              {pagedCalls.length === 0 ? (
+                <div className="text-center py-6 text-xs text-slate-400">
+                  No outbound calls placed in this workspace yet.
+                </div>
               ) : (
-                calls.map((call) => (
+                pagedCalls.map((call) => (
                   <div
                     key={call.id}
                     onClick={() => setSelectedCall(call)}
@@ -484,14 +859,20 @@ export function VoiceClient({
                     <div>
                       <div className="text-xs font-bold text-slate-800 flex items-center gap-2">
                         {call.contactName}
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                          call.outcome === "APPOINTMENT_BOOKED"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : call.outcome === "OPTED_OUT"
-                              ? "bg-rose-100 text-rose-700"
-                              : "bg-slate-100 text-slate-600"
-                        }`}>
-                          {call.outcome}
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                            call.status === "IN_PROGRESS"
+                              ? "bg-teal-100 text-teal-800"
+                              : call.outcome === "APPOINTMENT_BOOKED"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : call.outcome === "OPTED_OUT"
+                                  ? "bg-rose-100 text-rose-700"
+                                  : call.outcome === "BLOCKED_BY_GATE"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {call.status === "IN_PROGRESS" ? "LIVE" : call.outcome}
                         </span>
                       </div>
                       <div className="text-[11px] text-slate-400">
@@ -500,7 +881,8 @@ export function VoiceClient({
                     </div>
                     <div className="text-right">
                       <div className="text-xs font-mono font-semibold text-slate-700">
-                        ${(call.costCents / 100).toFixed(2)}
+                        {currencySymbol}
+                        {(call.costCents / 100).toFixed(2)}
                       </div>
                       <div className="text-[10px] text-slate-400">{call.sentiment}</div>
                     </div>

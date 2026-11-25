@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { WebhookInboundPayloadSchema } from "@/contracts/lead-contracts";
-import { getTenantSnapshot, ingestStoreBatch } from "@/lib/store";
+import { ensureStoreHydrated, getTenantSnapshot, ingestStoreBatch, persistTenantStateToPostgres } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   try {
+    await ensureStoreHydrated();
     const rawBody = await req.text();
     const signature = req.headers.get("x-n8n-signature") || req.headers.get("x-signature-sha256");
     const requestedSlug =
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
       "n8n Webhook Bridge"
     );
 
+    await persistTenantStateToPostgres(snap.tenant.slug);
     const updatedSnap = getTenantSnapshot(snap.tenant.slug);
     const isReconciled =
       run.totalInbound ===
