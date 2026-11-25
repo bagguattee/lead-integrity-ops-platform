@@ -204,31 +204,64 @@ export function ShellNavigation({
           </div>
         </div>
 
-        {/* Bottom Copilot Bubble & Role Quick-Toggle */}
-        <div className="p-5 flex items-center justify-between gap-2">
+        {/* Bottom Section: Copilot & Reviewer Demo Persona Harness */}
+        <div className="p-3 border-t border-white/10 space-y-2">
+          {/* AI Copilot Quick Launcher */}
           <button
             type="button"
             onClick={() => setCopilotOpen(true)}
             data-testid="open-copilot-btn"
             title="Open Tenant-Scoped AI Ops Copilot"
-            className="w-10 h-10 rounded-full bg-white/25 hover:bg-white/35 backdrop-blur-xs flex items-center justify-center text-white shadow-sm transition flex-shrink-0"
+            className="w-full px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 backdrop-blur-xs flex items-center justify-between text-white shadow-xs transition"
           >
-            <MessageSquare className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-3.5 h-3.5 text-[#5CE1C6]" />
+              <span className="text-xs font-semibold">AI Ops Copilot</span>
+            </div>
+            <span className="text-[9px] font-mono bg-[#5CE1C6]/20 text-[#5CE1C6] px-1.5 py-0.5 rounded font-bold">RAG</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handleCycleRole}
-            disabled={isSwitching}
-            data-testid="role-cycle-btn"
-            title="Click to cycle RBAC role (OWNER / ADMIN / REVIEWER / VIEWER)"
-            className="flex-1 min-w-0 px-2.5 py-1.5 rounded-xl bg-[#081E6B]/30 hover:bg-[#081E6B]/45 border border-white/20 text-left transition"
-          >
-            <span className="text-[10px] font-bold text-white block truncate">{userName}</span>
-            <span className="text-[9px] font-mono text-white/85 block">
-              Role: <strong>{currentRole}</strong> ↻
-            </span>
-          </button>
+          {/* Evaluator RBAC Test Harness */}
+          <div className="rounded-xl bg-[#081E6B]/40 border border-white/15 p-2 text-left">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[9px] font-bold tracking-wider uppercase text-white/60">
+                RBAC Test Harness
+              </span>
+              <span className="text-[8px] font-bold uppercase tracking-wider bg-emerald-400/20 text-emerald-300 px-1 py-0.2 rounded border border-emerald-400/30">
+                Evaluation
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCycleRole}
+              disabled={isSwitching}
+              data-testid="role-cycle-btn"
+              title="Click to cycle RBAC role for testing (OWNER / ADMIN / REVIEWER / VIEWER)"
+              className="w-full px-2 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 flex items-center justify-between transition group"
+            >
+              <div className="min-w-0 text-left">
+                <span className="text-[11px] font-bold text-white flex items-center gap-1.5 truncate">
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    currentRole === "OWNER" ? "bg-purple-400" :
+                    currentRole === "ADMIN" ? "bg-blue-400" :
+                    currentRole === "REVIEWER" ? "bg-amber-400" : "bg-slate-400"
+                  }`} />
+                  {currentRole}
+                  <span className="text-[9px] text-white/50 font-normal">({userName.split(' ')[0]})</span>
+                </span>
+                <span className="text-[8.5px] text-white/70 block leading-tight">
+                  {currentRole === "VIEWER" ? "Read-Only (403 on mutations)" : "Full operational permissions"}
+                </span>
+              </div>
+              <span className="text-xs text-white/60 group-hover:text-white transition ml-1 flex-shrink-0">
+                ↻
+              </span>
+            </button>
+            <p className="text-[8px] text-white/50 mt-1 leading-tight">
+              Reviewer tool: test 403 Server Action boundaries without re-login.
+            </p>
+          </div>
         </div>
       </aside>
 
