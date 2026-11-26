@@ -9,6 +9,21 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password123
+          POSTGRES_DB: lead_integrity_ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -18,23 +33,25 @@ jobs:
         with:
           node-version: 20
           cache: "npm"
-          cache-dependency-path: lead-integrity-ops-platform/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install Dependencies
         run: npm ci
-        working-directory: lead-integrity-ops-platform
 
-      - name: Setup Prisma Client & SQLite DB
+      - name: Setup Prisma Client & PostgreSQL Database
+        env:
+          DATABASE_URL: "postgresql://postgres:password123@localhost:5432/lead_integrity_ops?schema=public"
         run: |
           npx prisma generate
           npx prisma db push
           npx tsx scripts/seed.ts
-        working-directory: lead-integrity-ops-platform
 
-      - name: Run 6-Gate Deterministic Verification Suite
+      - name: Run 7-Gate Deterministic Verification Suite
+        env:
+          DATABASE_URL: "postgresql://postgres:password123@localhost:5432/lead_integrity_ops?schema=public"
         run: npm run verify
-        working-directory: lead-integrity-ops-platform
 
       - name: Next.js Production Build
+        env:
+          DATABASE_URL: "postgresql://postgres:password123@localhost:5432/lead_integrity_ops?schema=public"
         run: npm run build
-        working-directory: lead-integrity-ops-platform
