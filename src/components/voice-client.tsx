@@ -13,6 +13,13 @@ import {
 import { UserRole } from "@/contracts/lead-contracts";
 import { CallRecord, ClockMode, VoiceScenario, VOICE_POLICY } from "@/lib/voice";
 import {
+  unlockAudioAndSpeech,
+  playTelephoneRing,
+  playCallConnected,
+  playHangupTone,
+  speakAgentVoice,
+} from "@/lib/audio-effects";
+import {
   PhoneCall,
   PhoneOff,
   ShieldAlert,
@@ -105,27 +112,32 @@ export function VoiceClient({
   const selectedMaster = masters.find((m) => m.id === targetMasterId) || null;
   const isLiveCallActive = selectedCall?.status === "IN_PROGRESS";
 
+  const [liveElapsedSec, setLiveElapsedSec] = useState(0);
+  const [isDialing, setIsDialing] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
+
+  // Live wall-clock timer for active or replaying calls
+  useEffect(() => {
+    if (!isLiveCallActive && !isReplaying) {
+      setLiveElapsedSec(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setLiveElapsedSec((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isLiveCallActive, isReplaying]);
+
   // Keep selectedCall synchronized with fresh server props when router refreshes
   useEffect(() => {
+    if (isReplaying) return;
     if (!selectedCall) {
       if (calls[0]) setSelectedCall(calls[0]);
       return;
     }
     const fresh = calls.find((c) => c.id === selectedCall.id);
     if (fresh) setSelectedCall(fresh);
-  }, [calls, selectedCall]);
-
-  const speakAgentText = (text: string) => {
-    if (!audioEnabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1.04;
-      window.speechSynthesis.speak(utter);
-    } catch {
-      // ignore TTS errors in headless environments
-    }
-  };
+  }, [calls, selectedCall, isReplaying]);
 
   const handleSelectLead = (leadId: string) => {
     const lead = masters.find((m) => m.id === leadId);
@@ -151,13 +163,23 @@ export function VoiceClient({
   };
 
   const handleStartInteractiveCall = () => {
+    // 1. Synchronously unlock browser audio & speech policies during user click
+    unlockAudioAndSpeech();
+
     const contactName = targetContactName.trim() || "Test Homeowner";
     const phone =
       targetPhone.trim() ||
       (locale === "AU" ? "+61 411 222 333" : locale === "UK" ? "+44 7700 900123" : "+1 512 555 0199");
 
     setStatusMessage(null);
+    setIsDialing(true);
+
     startTransition(async () => {
+      if (audioEnabled) {
+        await playTelephoneRing(locale);
+      }
+      setIsDialing(false);
+
       const res = await startInteractiveVoiceCallAction({
         masterId: targetMasterId,
         contactName,
@@ -167,10 +189,17 @@ export function VoiceClient({
       if (rec) setSelectedCall(rec);
 
       if (res.ok && rec) {
+        if (audioEnabled) playCallConnected();
         setStatusMessage({ text: res.message, tone: "positive" });
         const opener = rec.transcript[0]?.text;
-        if (opener) speakAgentText(opener);
+        if (opener && audioEnabled) {
+          speakAgentVoice(opener, {
+            onStart: () => setIsAgentThinking(true),
+            onEnd: () => setIsAgentThinking(false),
+          });
+        }
       } else {
+        if (audioEnabled) playHangupTone();
         setStatusMessage({ text: `Pre-Dial Gate Blocked: ${res.message}`, tone: "danger" });
       }
       router.refresh();
@@ -178,6 +207,7 @@ export function VoiceClient({
   };
 
   const handleResetLimits = () => {
+    unlockAudioAndSpeech();
     setStatusMessage(null);
     startTransition(async () => {
       const res = await resetVoiceLimitsAction({
@@ -193,6 +223,7 @@ export function VoiceClient({
   };
 
   const handleSendCustomerReply = (overrideText?: string) => {
+    unlockAudioAndSpeech();
     if (!selectedCall || selectedCall.status !== "IN_PROGRESS") return;
     const text = (overrideText ?? customerReply).trim();
     if (!text) return;
@@ -200,19 +231,28 @@ export function VoiceClient({
     setCustomerReply("");
     setStatusMessage(null);
     setIsAgentThinking(true);
+
     startTransition(async () => {
-      // Natural 650ms speech & reasoning pacing
-      await new Promise((r) => setTimeout(r, 650));
       const res = await sendInteractiveVoiceReplyAction({
         callId: selectedCall.id,
         customerMessage: text,
       });
-      setIsAgentThinking(false);
       const rec = res.data as CallRecord | undefined;
       if (rec) {
         setSelectedCall(rec);
+        setIsAgentThinking(false);
         const lastAgentTurn = [...rec.transcript].reverse().find((t) => t.role === "agent");
-        if (lastAgentTurn) speakAgentText(lastAgentTurn.text);
+        if (lastAgentTurn && audioEnabled) {
+          speakAgentVoice(lastAgentTurn.text, {
+            onStart: () => setIsAgentThinking(true),
+            onEnd: () => setIsAgentThinking(false),
+          });
+        }
+        if (rec.status === "COMPLETED" && audioEnabled) {
+          playHangupTone();
+        }
+      } else {
+        setIsAgentThinking(false);
       }
       setStatusMessage({
         text: res.message,
@@ -227,7 +267,9 @@ export function VoiceClient({
   };
 
   const handleHangUp = () => {
+    unlockAudioAndSpeech();
     if (!selectedCall || selectedCall.status !== "IN_PROGRESS") return;
+    if (audioEnabled) playHangupTone();
     startTransition(async () => {
       const res = await hangUpInteractiveVoiceCallAction(selectedCall.id);
       const rec = res.data as CallRecord | undefined;
@@ -238,13 +280,21 @@ export function VoiceClient({
   };
 
   const handleDispatchQaReplay = () => {
+    unlockAudioAndSpeech();
     const contactName = targetContactName.trim() || "Test Homeowner";
     const phone =
       targetPhone.trim() ||
       (locale === "AU" ? "+61 411 222 333" : locale === "UK" ? "+44 7700 900123" : "+1 512 555 0199");
 
     setStatusMessage(null);
+    setIsDialing(true);
+
     startTransition(async () => {
+      if (audioEnabled) {
+        await playTelephoneRing(locale);
+      }
+      setIsDialing(false);
+
       const res = await triggerVoiceCallAction({
         masterId: targetMasterId,
         contactName,
@@ -252,11 +302,61 @@ export function VoiceClient({
         scenario: selectedScenario,
       });
 
-      const rec = res.data as CallRecord | undefined;
-      if (rec) setSelectedCall(rec);
+      const fullRec = res.data as CallRecord | undefined;
+      if (!res.ok || !fullRec) {
+        if (audioEnabled) playHangupTone();
+        setStatusMessage({
+          text: `Blocked: ${res.message}`,
+          tone: "danger",
+        });
+        router.refresh();
+        return;
+      }
+
+      if (audioEnabled) playCallConnected();
+
+      // Progressive Live Playback of turns with audio!
+      setIsReplaying(true);
+      const turns = fullRec.transcript;
+
+      const tempCall: CallRecord = {
+        ...fullRec,
+        status: "IN_PROGRESS",
+        transcript: turns.slice(0, 1),
+      };
+      setSelectedCall(tempCall);
+
+      // Play Turn 1 (Ash speaks aloud)
+      if (turns[0] && audioEnabled) {
+        setIsAgentThinking(true);
+        await speakAgentVoice(turns[0].text, {
+          onStart: () => setIsAgentThinking(true),
+          onEnd: () => setIsAgentThinking(false),
+        });
+      }
+
+      // Progressively step through subsequent dialogue turns
+      for (let i = 1; i < turns.length; i++) {
+        const turn = turns[i];
+        await new Promise((r) => setTimeout(r, 1200));
+        tempCall.transcript = turns.slice(0, i + 1);
+        setSelectedCall({ ...tempCall });
+
+        if (turn.role === "agent" && audioEnabled) {
+          setIsAgentThinking(true);
+          await speakAgentVoice(turn.text, {
+            onStart: () => setIsAgentThinking(true),
+            onEnd: () => setIsAgentThinking(false),
+          });
+        }
+      }
+
+      setIsReplaying(false);
+      setSelectedCall(fullRec);
+      if (audioEnabled) playHangupTone();
       setStatusMessage({
-        text: res.ok ? res.message : `Blocked: ${res.message}`,
-        tone: res.ok ? "positive" : "danger",
+        text: `Automated call simulation completed (${fullRec.outcome})`,
+        tone: "positive",
       });
       router.refresh();
     });
@@ -580,24 +680,34 @@ export function VoiceClient({
             {mode === "INTERACTIVE" ? (
               <button
                 type="button"
-                disabled={isPending || currentRole === "VIEWER"}
+                disabled={isPending || isDialing || currentRole === "VIEWER"}
                 onClick={handleStartInteractiveCall}
                 data-testid="start-interactive-call-btn"
                 className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-[#00D2A0] to-[#0A4D68] text-white font-bold text-xs uppercase tracking-wider shadow-sm hover:opacity-95 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <PhoneCall className="w-4 h-4" />
-                {isPending ? "Checking Pre-Dial Gate..." : "Start Live Call (You Play Customer)"}
+                {isDialing
+                  ? "Dialing Outbound Call (Ringing...)..."
+                  : isPending
+                    ? "Checking Pre-Dial Gate..."
+                    : "Start Live Call (You Play Customer)"}
               </button>
             ) : (
               <button
                 type="button"
-                disabled={isPending || currentRole === "VIEWER"}
+                disabled={isPending || isDialing || isReplaying || currentRole === "VIEWER"}
                 onClick={handleDispatchQaReplay}
                 data-testid="run-qa-replay-btn"
                 className="w-full py-3 px-4 rounded-xl bg-[#1649C7] hover:bg-[#1E5EFF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Play className="w-4 h-4 fill-current" />
-                {isPending ? "Running Automated Replay..." : "Run Automated QA Replay"}
+                {isDialing
+                  ? "Dialing..."
+                  : isReplaying
+                    ? "Playing Live Audio Simulation..."
+                    : isPending
+                      ? "Connecting..."
+                      : "Run Automated QA Replay"}
               </button>
             )}
 
@@ -664,8 +774,11 @@ export function VoiceClient({
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {selectedCall.phone} • Duration: {selectedCall.durationSec}s • Cost:{" "}
-                    {currencySymbol}
+                    {selectedCall.phone} • Duration:{" "}
+                    <strong className="text-slate-600 font-mono">
+                      {isLiveCallActive || isReplaying ? `${liveElapsedSec}s (live)` : `${selectedCall.durationSec}s`}
+                    </strong>{" "}
+                    • Cost: {currencySymbol}
                     {(selectedCall.costCents / 100).toFixed(2)}
                   </p>
                 </div>
