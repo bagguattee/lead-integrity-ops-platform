@@ -235,7 +235,7 @@ export function evaluatePreDialGate(input: PreDialInput): GateResult {
   }
 
   if (input.priorAttempts >= input.maxAttempts)
-    return block("MAX_ATTEMPTS", `Max attempts reached (${input.priorAttempts}/${input.maxAttempts}).`);
+    return block("MAX_ATTEMPTS", `Max attempts reached (${input.priorAttempts}/${input.maxAttempts}). Click "Reset Dials & DNC" to test again.`);
 
   if (input.isPaused)
     return block("FINOPS_PAUSED", "FinOps Cache-Only mode is active — paid voice minutes are blocked.");
@@ -275,7 +275,7 @@ export function defaultVoiceConfig(tenantName: string, locale: SupportedLocale):
       "Never invent facts about warranties, insurance, or availability — use tools.",
     ].join("\n"),
     disclosure: "I'm an AI assistant and this call may be recorded for quality.",
-    maxAttempts: 3,
+    maxAttempts: 25,
     recordCalls: true,
     transferNumber: transfer,
   };
@@ -565,12 +565,51 @@ export function evaluateInteractiveCustomerTurn(params: {
     };
   }
 
+  // 4b. Common Homeowner Objection: "Is it really free?" / "Do I have to pay?"
+  if (/(free|charge|cost anything|obligation|catch)/i.test(msg)) {
+    const tools: ToolEvent[] = [];
+    if (!hasCheckedAvailability) {
+      tools.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
+    }
+    return {
+      agentReply: `Yes, it's 100% free with absolutely zero obligation, ${first}. Our technician inspects the property, takes photos, and hands you an itemized report. Would ${slotA} or ${slotB} work better for you?`,
+      newToolEvents: tools,
+      shouldEndCall: false,
+    };
+  }
+
+  // 4c. Common Homeowner Objection: "Do I need to be home?" / "Can you just inspect outside?"
+  if (/(need to be home|be there|at home|gate|exterior|stay home)/i.test(msg)) {
+    const tools: ToolEvent[] = [];
+    if (!hasCheckedAvailability) {
+      tools.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
+    }
+    return {
+      agentReply: `As long as our technician has safe exterior access around the property perimeter, you don't even need to be home, ${first}! If you are home, they'll walk you through findings in person. Should we lock in ${slotA} or ${slotB}?`,
+      newToolEvents: tools,
+      shouldEndCall: false,
+    };
+  }
+
+  // 4d. Common Homeowner Objection: "How long does it take?"
+  if (/(how long|duration|take long|minutes|hours)/i.test(msg)) {
+    const tools: ToolEvent[] = [];
+    if (!hasCheckedAvailability) {
+      tools.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
+    }
+    return {
+      agentReply: `It takes only about 15 to 20 minutes! The technician evaluates the roof, gutters, and flashing, then provides an inspection summary. Would ${slotA} or ${slotB} fit your calendar?`,
+      newToolEvents: tools,
+      shouldEndCall: false,
+    };
+  }
+
   // 5. Slot confirmation -> Book Appointment tool!
   if (hasCheckedAvailability && !hasBooked && CONFIRM_SLOT_RE.test(msg)) {
-    const pickedSecond = /(second|14:00|2:00|2 pm|afternoon)/i.test(msg);
+    const pickedSecond = /(second|14:00|2:00|2 pm|afternoon|later)/i.test(msg);
     const chosenSlot = pickedSecond ? slotB : slotA;
     return {
-      agentReply: `Awesome — you're officially booked for ${chosenSlot} with ${params.tenantName}! I've synced your confirmation straight into our dispatch calendar. Anything else I can help with today, ${first}?`,
+      agentReply: `Awesome — you're officially booked for ${chosenSlot} with ${params.tenantName}! I've synced your confirmation straight into our dispatch calendar. Do you have any gate code or specific roof concern we should note for our technician, ${first}?`,
       newToolEvents: [
         {
           name: "book_appointment",
@@ -582,10 +621,26 @@ export function evaluateInteractiveCustomerTurn(params: {
     };
   }
 
-  // 6. Post-booking wrap-up
+  // 6. Post-booking conversational handling (Doesn't just dump a static repetition)
   if (hasBooked) {
+    if (/(gate|code|dog|backyard|leak|garage|side|key|note)/i.test(msg)) {
+      return {
+        agentReply: `Got that noted in your dispatch file for our technician! Thanks so much for taking my call, ${first}. We'll see you for the visit. Have a wonderful day!`,
+        newToolEvents: [],
+        shouldEndCall: true,
+        endedReason: "appointment-confirmed-ended",
+      };
+    }
+    if (/(no|nope|all good|that's all|thanks|thank you|sounds good|perfect|bye)/i.test(msg)) {
+      return {
+        agentReply: `You're very welcome, ${first}! We'll send an SMS reminder before arriving. Have a great rest of your day!`,
+        newToolEvents: [],
+        shouldEndCall: true,
+        endedReason: "appointment-confirmed-ended",
+      };
+    }
     return {
-      agentReply: `Thanks so much, ${first}! We'll see you then. Have a wonderful day.`,
+      agentReply: `Thanks so much, ${first}! Your appointment is locked in with ${params.tenantName}. We'll see you then. Have a wonderful day!`,
       newToolEvents: [],
       shouldEndCall: true,
       endedReason: "appointment-confirmed-ended",

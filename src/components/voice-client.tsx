@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   hangUpInteractiveVoiceCallAction,
+  resetVoiceLimitsAction,
   sendInteractiveVoiceReplyAction,
   setVoiceClockModeAction,
   startInteractiveVoiceCallAction,
@@ -31,6 +32,7 @@ import {
   ChevronRight,
   UserCheck,
   Bot,
+  RotateCcw,
 } from "lucide-react";
 
 interface VoiceClientProps {
@@ -80,7 +82,8 @@ export function VoiceClient({
   const router = useRouter();
   const [mode, setMode] = useState<"INTERACTIVE" | "QA_REPLAY">("INTERACTIVE");
   const [clockMode, setClockMode] = useState<ClockMode>(initialClockMode);
-  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [isAgentThinking, setIsAgentThinking] = useState(false);
 
   const [selectedScenario, setSelectedScenario] = useState<VoiceScenario>("INTERESTED_BOOKS");
   const [targetContactName, setTargetContactName] = useState(masters[0]?.canonicalName || "");
@@ -174,6 +177,21 @@ export function VoiceClient({
     });
   };
 
+  const handleResetLimits = () => {
+    setStatusMessage(null);
+    startTransition(async () => {
+      const res = await resetVoiceLimitsAction({
+        phone: targetPhone,
+        masterId: targetMasterId,
+      });
+      setStatusMessage({
+        text: res.message,
+        tone: res.ok ? "positive" : "danger",
+      });
+      router.refresh();
+    });
+  };
+
   const handleSendCustomerReply = (overrideText?: string) => {
     if (!selectedCall || selectedCall.status !== "IN_PROGRESS") return;
     const text = (overrideText ?? customerReply).trim();
@@ -181,11 +199,15 @@ export function VoiceClient({
 
     setCustomerReply("");
     setStatusMessage(null);
+    setIsAgentThinking(true);
     startTransition(async () => {
+      // Natural 650ms speech & reasoning pacing
+      await new Promise((r) => setTimeout(r, 650));
       const res = await sendInteractiveVoiceReplyAction({
         callId: selectedCall.id,
         customerMessage: text,
       });
+      setIsAgentThinking(false);
       const rec = res.data as CallRecord | undefined;
       if (rec) {
         setSelectedCall(rec);
@@ -279,6 +301,16 @@ export function VoiceClient({
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <button
             type="button"
+            onClick={handleResetLimits}
+            disabled={isPending}
+            title="Reset max attempt counters & clear test DNC flags for unlimited evaluation"
+            className="px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 text-xs font-bold flex items-center gap-1.5 transition"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+            Reset Dials &amp; DNC
+          </button>
+          <button
+            type="button"
             onClick={() => setAudioEnabled((v) => !v)}
             data-testid="voice-audio-toggle"
             className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition ${
@@ -335,7 +367,18 @@ export function VoiceClient({
                 : "bg-rose-50 text-rose-900 border-rose-200"
           }`}
         >
-          <span>{statusMessage.text}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>{statusMessage.text}</span>
+            {statusMessage.tone === "danger" && (
+              <button
+                type="button"
+                onClick={handleResetLimits}
+                className="ml-2 px-2 py-0.5 rounded bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-bold text-[11px] transition"
+              >
+                Reset Dial Counters &amp; Retry
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setStatusMessage(null)}
@@ -718,6 +761,15 @@ export function VoiceClient({
                       </div>
                     ))
                   )}
+
+                  {/* Animated Agent Evaluation / Speaking Waveform */}
+                  {isAgentThinking && (
+                    <div className="p-3 rounded-xl bg-teal-50 border border-teal-200 text-teal-900 mr-8 flex items-center gap-2.5 text-xs animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-teal-500 animate-ping" />
+                      <span className="font-bold">{agentConfig.agentName} (AI) is evaluating &amp; speaking...</span>
+                      <span className="font-mono text-teal-700 text-xs font-bold tracking-widest">ılılıllı</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -731,8 +783,8 @@ export function VoiceClient({
                     <span className="text-xs font-bold text-[#172554]">
                       Respond as {selectedCall.contactName} (Homeowner):
                     </span>
-                    <span className="text-[10px] font-mono text-teal-700 bg-teal-100 px-2 py-0.5 rounded-full">
-                      2-Way Live Turn
+                    <span className="text-[10px] font-mono text-teal-700 bg-teal-100 px-2 py-0.5 rounded-full font-bold">
+                      2-Way Live Turn (Browser Voice Audio Active)
                     </span>
                   </div>
 
@@ -740,16 +792,19 @@ export function VoiceClient({
                   <div className="flex flex-wrap gap-1.5">
                     {[
                       { label: "Yes, what times are open?", text: "Yes, I have a minute. What times do you have available?" },
-                      { label: "How much does it cost?", text: "Wait, how much does a new roof cost?" },
+                      { label: "Is it completely free?", text: "Wait, is this inspection completely free with no obligation?" },
+                      { label: "Do I need to be home?", text: "Do I need to be home for the technician to inspect the roof?" },
+                      { label: "How much does a new roof cost?", text: "Can you just give me a ballpark quote over the phone?" },
                       { label: "First slot works, book it", text: "The first slot works for me, please book it." },
+                      { label: "Speak to human specialist", text: "I'd prefer to speak directly with a human specialist." },
                       { label: "Stop calling me (Test DNC)", text: "Please stop calling me and remove my number from your list." },
                     ].map((chip) => (
                       <button
                         key={chip.label}
                         type="button"
-                        disabled={isPending}
+                        disabled={isPending || isAgentThinking}
                         onClick={() => handleSendCustomerReply(chip.text)}
-                        className="px-2.5 py-1 rounded-full bg-white border border-[#DCE6F7] hover:border-[#1649C7] text-[11px] font-semibold text-[#1649C7] transition"
+                        className="px-2.5 py-1 rounded-full bg-white border border-[#DCE6F7] hover:border-[#1649C7] text-[11px] font-semibold text-[#1649C7] transition hover:bg-slate-50"
                       >
                         {chip.label}
                       </button>

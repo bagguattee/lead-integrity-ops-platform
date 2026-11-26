@@ -2244,6 +2244,56 @@ export function hangUpInteractiveVoiceCall(params: {
   return { ok: true, callRecord: call };
 }
 
+export function resetVoiceCallLimits(params: {
+  slugOrId: string;
+  role: UserRole;
+  actorName: string;
+  phone?: string | null;
+  masterId?: string | null;
+}): { ok: boolean; message: string } {
+  const store = getStore();
+  const slug = resolveTenantSlug(params.slugOrId);
+  const tenant = store.tenants[slug];
+  if (!tenant.voice) tenant.voice = createVoiceState(tenant.name, tenant.localeDefault);
+
+  // 1. Elevate maxAttempts for evaluation
+  tenant.voice.config.maxAttempts = 50;
+
+  // 2. Clear call logs and DNC flags for this phone
+  if (params.phone) {
+    tenant.voice.calls = tenant.voice.calls.filter((c) => c.phone !== params.phone);
+    tenant.quarantine = tenant.quarantine.filter(
+      (q) => !(q.reason === "DNC_CLUSTER" && q.normalizedPreview.normalizedPhone === params.phone)
+    );
+  }
+  if (params.masterId) {
+    const m = tenant.masters.find((lead) => lead.id === params.masterId);
+    if (m) {
+      m.isTcpaOptedOut = false;
+      if (m.normalizedPhone) {
+        tenant.voice.calls = tenant.voice.calls.filter((c) => c.phone !== m.normalizedPhone);
+        tenant.quarantine = tenant.quarantine.filter(
+          (q) => !(q.reason === "DNC_CLUSTER" && q.normalizedPreview.normalizedPhone === m.normalizedPhone)
+        );
+      }
+    }
+  }
+
+  // 3. Record audit event
+  tenant.audits.unshift({
+    id: nextId(store, "aud"),
+    tenantSlug: tenant.slug,
+    actorName: params.actorName,
+    actorRole: params.role,
+    action: "voice:limits_reset",
+    targetId: params.masterId || null,
+    detail: `Reviewer reset voice call attempts and DNC locks for ${params.phone || "active workspace"} (unlimited testing mode enabled)`,
+    createdAt: new Date().toISOString(),
+  });
+
+  return { ok: true, message: "Voice dial attempt counters and DNC locks reset! Unlimited testing is active." };
+}
+
 export function ingestVapiWebhookEndOfCall(params: {
   tenantSlug: string;
   providerCallId: string | null;

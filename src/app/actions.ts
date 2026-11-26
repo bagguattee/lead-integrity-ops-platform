@@ -19,6 +19,7 @@ import {
   toggleStoreEnrichmentPause,
   updateStoreBudgetPolicy,
   updateVoiceClockMode,
+  resetVoiceCallLimits,
 } from "@/lib/store";
 import { ClockMode, VoiceScenario } from "@/lib/voice";
 import { RawInboundLead, SupportedLocale, UserRole } from "@/contracts/lead-contracts";
@@ -594,6 +595,27 @@ export async function triggerVoiceCallAction(params: {
     return { ok: true, message: `Automated QA replay executed (${result.callRecord?.outcome || "OK"})`, data: result.callRecord };
   } catch (err: unknown) {
     return { ok: false, message: err instanceof Error ? err.message : "Voice dispatch failed" };
+  }
+}
+
+export async function resetVoiceLimitsAction(params?: {
+  phone?: string;
+  masterId?: string | null;
+}): Promise<ActionResult> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    const result = resetVoiceCallLimits({
+      slugOrId: session.tenantSlug,
+      role: session.role,
+      actorName: session.userName,
+      phone: params?.phone,
+      masterId: params?.masterId,
+    });
+    revalidateAllSurfaces();
+    return { ok: true, message: result.message };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Failed to reset voice limits" };
   }
 }
 

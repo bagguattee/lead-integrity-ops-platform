@@ -224,8 +224,12 @@ export function QuarantineTable({
                         {item.id}
                       </span>
                     </td>
-                    <td className="py-4 px-3">
-                      <span className="font-bold text-[#172554] block">
+                    <td
+                      className="py-4 px-3 cursor-pointer"
+                      onClick={() => openInspector(item)}
+                      title="Click to view full lead dossier & AI triage breakdown"
+                    >
+                      <span className="font-bold text-[#172554] hover:text-[#1649C7] transition block">
                         {item.normalizedPreview.canonicalName}
                       </span>
                       <span className="text-[11px] font-mono text-slate-500 block">
@@ -326,112 +330,276 @@ export function QuarantineTable({
         </div>
       )}
 
-      {/* Side-by-Side Diff & Field Editor Modal */}
-      {inspectItem && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0A194E]/45 backdrop-blur-xs"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Inspect and Edit Quarantined Lead"
-        >
-          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col bg-white rounded-2xl border border-[#E4EBF5] shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 bg-[#F8FAFE] border-b border-[#E8EEF6] flex items-center justify-between flex-shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-[#172554]">
-                  HITL Quarantine Comparison &amp; Override
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {complianceLaw} • Gate: <strong>{inspectItem.reason}</strong>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setInspectItem(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Comprehensive HITL Lead Dossier & Audit Inspector Modal */}
+      {inspectItem && (() => {
+        let parsedPayload: Record<string, any> = {};
+        try {
+          parsedPayload = JSON.parse(inspectItem.rawPayload);
+        } catch {
+          parsedPayload = {};
+        }
 
-            <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Left: Raw Ingested Payload */}
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                  Raw Ingested Payload
-                </span>
-                <pre className="p-3.5 rounded-xl bg-[#F4F7FC] border border-[#E4ECF6] text-[11px] font-mono text-[#172554] overflow-x-auto max-h-60">
-                  {JSON.stringify(JSON.parse(inspectItem.rawPayload), null, 2)}
-                </pre>
-                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-3">
-                  <strong>Reason:</strong> {inspectItem.contaminatingRecord}
-                </p>
+        const notes =
+          parsedPayload.notes ||
+          parsedPayload.message ||
+          parsedPayload.inquiry ||
+          parsedPayload.comment ||
+          "No customer notes or description submitted with raw payload.";
+        const rawAddress =
+          parsedPayload.address ||
+          parsedPayload.street ||
+          [parsedPayload.street, parsedPayload.city, parsedPayload.state, parsedPayload.zip]
+            .filter(Boolean)
+            .join(", ") ||
+          "No street address provided in raw payload";
+        const sourceChannel =
+          parsedPayload.source_channel || parsedPayload.source || "Web Form / Meta Ads";
+        const confidencePct = Math.round(
+          (inspectItem.normalizedPreview.triageConfidence || 0.65) * 100
+        );
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0A194E]/60 backdrop-blur-xs"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Inspect and Audit Quarantined Lead Dossier"
+          >
+            <div className="w-full max-w-3xl max-h-[92vh] flex flex-col bg-white rounded-2xl border border-[#E4EBF5] shadow-2xl overflow-hidden">
+              {/* Header */}
+              <div className="px-6 py-4 bg-[#F8FAFE] border-b border-[#E8EEF6] flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#1649C7]/10 flex items-center justify-center text-[#1649C7]">
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-[#172554]">
+                        {inspectItem.normalizedPreview.canonicalName || "Quarantined Prospect"}
+                      </h3>
+                      {renderReasonPill(inspectItem.reason)}
+                    </div>
+                    <p className="text-[11px] font-mono text-slate-500">
+                      ID: {inspectItem.id} • {complianceLaw} Compliance Boundary
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInspectItem(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              {/* Right: Editable Canonical Fields */}
-              <div className="space-y-3">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#0D9488] block">
-                  Editable Normalized Fields
-                </span>
-                <div>
-                  <label className="text-xs font-semibold text-[#172554] block mb-1">Canonical Name</label>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs text-[#172554]"
-                  />
+              {/* Scrollable Audit Body */}
+              <div className="p-6 overflow-y-auto flex-1 space-y-5 text-xs">
+                {/* 1. Safety Gate & AI Triage Diagnostic Box */}
+                <div
+                  className={`p-4 rounded-xl border space-y-2.5 ${
+                    inspectItem.reason === "LOW_CONFIDENCE_HITL"
+                      ? "bg-blue-50/70 border-blue-200"
+                      : inspectItem.reason === "DNC_CLUSTER"
+                        ? "bg-rose-50/70 border-rose-200"
+                        : inspectItem.reason === "SHARED_HUB"
+                          ? "bg-amber-50/70 border-amber-200"
+                          : "bg-purple-50/70 border-purple-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[11px] uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <ShieldAlert className="w-4 h-4 text-[#1649C7]" />
+                      Safety Gate Audit: {inspectItem.reason}
+                    </span>
+                    {inspectItem.reason === "LOW_CONFIDENCE_HITL" && (
+                      <span className="font-mono text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                        AI Confidence: {confidencePct}% (Threshold: &ge;70%)
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-slate-700 leading-relaxed">
+                    <strong>Contaminating Trigger:</strong> {inspectItem.contaminatingRecord}
+                  </p>
+
+                  {/* AI Triage Guidance Card */}
+                  {inspectItem.reason === "LOW_CONFIDENCE_HITL" && (
+                    <div className="p-3 bg-white rounded-lg border border-blue-100 text-slate-600 space-y-2">
+                      <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 block font-semibold">Stated Intent</span>
+                          <span className="font-bold text-slate-800">
+                            {inspectItem.normalizedPreview.intentCategory || "UNCERTAIN"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-semibold">Confidence Rating</span>
+                          <span className="font-bold text-amber-600">{confidencePct}% (Low)</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-semibold">Estimated Value</span>
+                          <span className="font-bold text-emerald-600">
+                            ${(inspectItem.normalizedPreview.estimatedValue || 0).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-slate-100">
+                        <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider mb-0.5">
+                          Prospect Submitted Notes / Inquiry:
+                        </span>
+                        <p className="italic text-slate-800 font-medium bg-slate-50 p-2 rounded">
+                          &ldquo;{notes}&rdquo;
+                        </p>
+                      </div>
+                      <p className="text-[11px] text-blue-900 bg-blue-50/80 p-2 rounded border border-blue-100">
+                        <strong>Auditor Guidance:</strong> AI triage scored this record at {confidencePct}% confidence because the inquiry is ambiguous or missing timeframe details. Review the contact info below. If legitimate, click <strong>Approve</strong> or <strong>Save Edits</strong> to sync cleanly to GoHighLevel CRM.
+                      </p>
+                    </div>
+                  )}
+
+                  {inspectItem.reason === "DNC_CLUSTER" && (
+                    <p className="text-[11px] text-rose-800 bg-white p-2.5 rounded border border-rose-200">
+                      <strong>Statutory Legal Block:</strong> This phone or email is flagged on the Do-Not-Call list or belongs to an opted-out household cluster. Syncing is prohibited under {complianceLaw}. Confirm Permanent Quarantine below.
+                    </p>
+                  )}
+                  {inspectItem.reason === "SHARED_HUB" && (
+                    <p className="text-[11px] text-amber-800 bg-white p-2.5 rounded border border-amber-200">
+                      <strong>Broker Hub Detection:</strong> This telephone line has appeared under &gt;3 distinct customer surnames within 60 days. Quarantined to prevent lead broker list recycling.
+                    </p>
+                  )}
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-[#172554] block mb-1">Phone (auto-formats to E.164)</label>
-                  <input
-                    type="text"
-                    value={editPhone}
-                    onChange={(e) => setEditPhone(e.target.value)}
-                    placeholder="Enter valid phone..."
-                    className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs font-mono text-[#172554]"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-[#172554] block mb-1">Email</label>
-                  <input
-                    type="text"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    placeholder="contact@company.com"
-                    className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs font-mono text-[#172554]"
-                  />
+
+                {/* 2. Side-by-Side: Raw Ingested Data vs Normalized Lead Dossier */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Left: Raw Ingested Data */}
+                  <div className="space-y-3">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Raw Inbound Submission
+                    </span>
+                    <div className="p-3.5 rounded-xl bg-[#F4F7FC] border border-[#E4ECF6] space-y-2 text-[11px]">
+                      <div>
+                        <span className="text-slate-400 font-semibold block">Source Channel</span>
+                        <span className="text-slate-800 font-medium">{sourceChannel}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 font-semibold block">Raw Address</span>
+                        <span className="text-slate-800 font-medium">{rawAddress}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 font-semibold block">Raw Notes</span>
+                        <span className="text-slate-800 italic block">{notes}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 font-semibold block">Full Payload JSON</span>
+                        <pre className="p-2 rounded bg-white border border-[#E2EAF5] font-mono text-[10px] text-slate-700 max-h-36 overflow-auto">
+                          {JSON.stringify(parsedPayload, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Editable Canonical Fields */}
+                  <div className="space-y-3">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#0D9488] block">
+                      Editable Normalized Fields
+                    </span>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs font-semibold text-[#172554] block mb-1">
+                          Canonical Name
+                        </label>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs text-[#172554] focus:outline-none focus:border-[#1E5EFF]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[#172554] block mb-1">
+                          Phone (Auto-formats to E.164)
+                        </label>
+                        <input
+                          type="text"
+                          value={editPhone}
+                          onChange={(e) => setEditPhone(e.target.value)}
+                          placeholder="e.g. +1 512 555 0199"
+                          className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs font-mono text-[#172554] focus:outline-none focus:border-[#1E5EFF]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[#172554] block mb-1">
+                          Email Address
+                        </label>
+                        <input
+                          type="text"
+                          value={editEmail}
+                          onChange={(e) => setEditEmail(e.target.value)}
+                          placeholder="prospect@example.com"
+                          className="w-full px-3 py-2 rounded-xl border border-[#DCE4F0] text-xs font-mono text-[#172554] focus:outline-none focus:border-[#1E5EFF]"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="px-6 py-4 bg-[#F8FAFE] border-t border-[#E8EEF6] flex items-center justify-end gap-2.5 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => handleResolve(inspectItem.id, "PERMANENT_QUARANTINE")}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA] transition"
-              >
-                Confirm Permanent Block
-              </button>
-              <button
-                type="button"
-                disabled={isPending}
-                onClick={() =>
-                  handleResolve(inspectItem.id, "EDITED_FIELDS", {
-                    editedName: editName,
-                    editedPhone: editPhone,
-                    editedEmail: editEmail,
-                  })
-                }
-                data-testid="modal-save-sync-btn"
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#1649C7] hover:bg-[#1E5EFF] text-white flex items-center gap-1.5 transition"
-              >
-                {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Save Edits &amp; Sync to GHL
-              </button>
+              {/* Action Buttons Footer */}
+              <div className="px-6 py-4 bg-[#F8FAFE] border-t border-[#E8EEF6] flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleResolve(inspectItem.id, "PERMANENT_QUARANTINE")}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#FEE2E2] hover:bg-[#FECACA] text-[#DC2626] transition flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Confirm Permanent Block
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => handleResolve(inspectItem.id, "SPLIT_MASTER")}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#EBF2FF] hover:bg-[#D7E6FA] text-[#1D4ED8] transition flex items-center gap-1.5"
+                  >
+                    <Split className="w-3.5 h-3.5" /> Split Cluster
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() =>
+                      handleResolve(inspectItem.id, "EDITED_FIELDS", {
+                        editedName: editName,
+                        editedPhone: editPhone,
+                        editedEmail: editEmail,
+                      })
+                    }
+                    data-testid="modal-save-sync-btn"
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-[#1649C7] hover:bg-[#1E5EFF] text-white flex items-center gap-1.5 transition"
+                  >
+                    {isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    )}
+                    Save Edits &amp; Sync to GHL
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isPending || inspectItem.reason === "DNC_CLUSTER"}
+                    onClick={() => handleResolve(inspectItem.id, "APPROVED_SYNC")}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-[#0D9488] hover:bg-[#0F766E] text-white flex items-center gap-1.5 transition disabled:opacity-40"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve &amp; Sync
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

@@ -63,6 +63,14 @@ export function ShellNavigation({
     });
   };
 
+  const handleSelectRole = (nextRole: UserRole) => {
+    if (nextRole === currentRole) return;
+    startTransition(async () => {
+      await switchRoleAction(nextRole);
+      router.refresh();
+    });
+  };
+
   const manageLinks = [
     { href: "/dashboard", label: "Balance & Ledger", icon: Wallet },
     { href: "/runs", label: "Ingestion Runs", icon: Layers },
@@ -222,43 +230,86 @@ export function ShellNavigation({
           </button>
 
           {/* Evaluator RBAC Test Harness */}
-          <div className="rounded-xl bg-[#081E6B]/40 border border-white/15 p-2 text-left">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[9px] font-bold tracking-wider uppercase text-white/60">
-                RBAC Test Harness
+          <div className="rounded-xl bg-[#081E6B]/40 border border-white/15 p-2 text-left space-y-1.5">
+            <button
+              type="button"
+              onClick={handleCycleRole}
+              disabled={isSwitching}
+              title="Click to cycle RBAC role"
+              className="w-full flex items-center justify-between hover:opacity-90 transition text-left cursor-pointer"
+            >
+              <span className="text-[9px] font-bold tracking-wider uppercase text-white/80 hover:text-white flex items-center gap-1">
+                RBAC Test Harness ↻
               </span>
-              <span className="text-[8px] font-bold uppercase tracking-wider bg-emerald-400/20 text-emerald-300 px-1 py-0.2 rounded border border-emerald-400/30">
+              <span className="text-[8px] font-bold uppercase tracking-wider bg-emerald-400/25 text-emerald-200 px-1.5 py-0.5 rounded border border-emerald-400/30">
                 Evaluation
               </span>
+            </button>
+
+            {/* Direct 1-Click Role Switcher Buttons */}
+            <div className="grid grid-cols-4 gap-1">
+              {(["OWNER", "ADMIN", "REVIEWER", "VIEWER"] as UserRole[]).map((r) => {
+                const isActive = currentRole === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    disabled={isSwitching}
+                    onClick={() => handleSelectRole(r)}
+                    data-testid={`role-btn-${r.toLowerCase()}`}
+                    title={`Switch active persona to ${r}`}
+                    className={`py-1 text-[9px] font-bold rounded transition text-center ${
+                      isActive
+                        ? r === "OWNER"
+                          ? "bg-purple-500 text-white shadow-xs"
+                          : r === "ADMIN"
+                            ? "bg-blue-500 text-white shadow-xs"
+                            : r === "REVIEWER"
+                              ? "bg-amber-500 text-white shadow-xs"
+                              : "bg-rose-500 text-white shadow-xs"
+                        : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                    }`}
+                  >
+                    {r.slice(0, 3)}
+                  </button>
+                );
+              })}
             </div>
 
+            {/* Active Persona Status Summary */}
             <button
               type="button"
               onClick={handleCycleRole}
               disabled={isSwitching}
               data-testid="role-cycle-btn"
               title="Click to cycle RBAC role for testing (OWNER / ADMIN / REVIEWER / VIEWER)"
-              className="w-full px-2 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 flex items-center justify-between transition group"
+              className="w-full px-2 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 flex items-center justify-between transition group text-left"
             >
-              <div className="min-w-0 text-left">
+              <div className="min-w-0">
                 <span className="text-[11px] font-bold text-white flex items-center gap-1.5 truncate">
-                  <span className={`w-1.5 h-1.5 rounded-full ${
-                    currentRole === "OWNER" ? "bg-purple-400" :
-                    currentRole === "ADMIN" ? "bg-blue-400" :
-                    currentRole === "REVIEWER" ? "bg-amber-400" : "bg-slate-400"
-                  }`} />
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      currentRole === "OWNER"
+                        ? "bg-purple-400"
+                        : currentRole === "ADMIN"
+                          ? "bg-blue-400"
+                          : currentRole === "REVIEWER"
+                            ? "bg-amber-400"
+                            : "bg-rose-400"
+                    }`}
+                  />
                   {currentRole}
-                  <span className="text-[9px] text-white/50 font-normal">({userName.split(' ')[0]})</span>
+                  <span className="text-[9px] text-white/50 font-normal">({userName.split(" ")[0]})</span>
                 </span>
-                <span className="text-[8.5px] text-white/70 block leading-tight">
-                  {currentRole === "VIEWER" ? "Read-Only (403 on mutations)" : "Full operational permissions"}
+                <span className="text-[8.5px] text-white/80 block leading-tight">
+                  {currentRole === "VIEWER" ? "403 on mutations (Read-Only)" : "Full operational permissions"}
                 </span>
               </div>
               <span className="text-xs text-white/60 group-hover:text-white transition ml-1 flex-shrink-0">
                 ↻
               </span>
             </button>
-            <p className="text-[8px] text-white/50 mt-1 leading-tight">
+            <p className="text-[8px] text-white/50 leading-tight">
               Reviewer tool: test 403 Server Action boundaries without re-login.
             </p>
           </div>
