@@ -153,6 +153,19 @@ export function playHangupTone(): void {
 }
 
 /**
+ * Immediately cancels any ongoing speech synthesis (Barge-in / Interruption)
+ */
+export function cancelSpeech(): void {
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
  * Speak text using Web Speech API with Chromium GC protection,
  * voice selection, and promise resolution when done.
  */

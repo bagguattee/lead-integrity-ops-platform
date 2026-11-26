@@ -108,6 +108,11 @@ test.describe.serial("IntegrityOps 99th-Percentile E2E Verification Suite", () =
     await expect(page.locator("body")).toContainText("Ash");
     await expect(page.locator("body")).toContainText("You Play Customer");
 
+    // Verify mode separation: QA Replay hides interactive reply panel
+    await page.getByTestId("voice-mode-qa").click();
+    await expect(page.getByTestId("interactive-reply-panel")).not.toBeVisible();
+    await page.getByTestId("voice-mode-interactive").click();
+
     // Start live interactive call as customer and test pricing guard + appointment booking
     await page.getByTestId("voice-lead-select").selectOption({ index: 2 });
     await page.getByTestId("start-interactive-call-btn").click();

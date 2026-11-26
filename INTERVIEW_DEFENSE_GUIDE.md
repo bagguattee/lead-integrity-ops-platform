@@ -22,6 +22,24 @@ A senior technical defense guide and 3-minute executive demo script explaining t
 **Defense:**
 > *"Most junior pipelines operate on fire-and-forget logic: webhooks arrive, some succeed, and some silently fail. In high-ticket contractor CRM systems, a lost lead represents a $10,000–$50,000 revenue dropout. We enforce: `Total Inbound = Clean Masters + Merged Duplicates + Quarantined Records + System Failures (0)`. If a single inbound record cannot be accounted for, the batch fails auditably rather than dropping data silently."*
 
+### Q5: What is the commercial purpose of the 3-Tier Lead Triage (Quarantine vs Routine vs High-Urgency), and why not send everything into a standard CRM drip?
+**Defense:**
+> *"In high-ticket roofing and solar ($15,000–$40,000 contracts), 'Speed-to-Lead' governs revenue. Research shows leads contacted within 5 minutes convert at 391% higher rates than those contacted after 30 minutes. If a homeowner submits an emergency form about an active ceiling collapse, putting them in a standard 2-hour email/SMS drip guarantees they call a competitor first. By triaging leads into 3 tiers:
+> 1. Quarantined leads are stopped before CRM ingestion, saving $500–$2,200 TCPA fines.
+> 2. Routine valid leads enter the standard nurture drip to protect staff capacity.
+> 3. Emergency high-urgency leads bypass the drip completely and trigger an immediate autonomous Voice AI dispatch (Ash) within 10 seconds, securing the job before competitors even open the email."*
+
+### Q6: How does the Voice AI Telephony Engine prevent call center hallucination and handle customer interruption (barge-in)?
+**Defense:**
+> *"Voice AI in regulated contracting must have strict operational guardrails:
+> 1. Pricing Defense: Homeowners constantly ask for phone quotes. If an AI hallucinates a '$5,000 full replacement', the contractor faces severe liability. Our agent Ash is strictly prohibited from quoting prices over the phone and is trained to steer to on-site roof inspections via `check_availability` and `book_appointment`.
+> 2. Pre-Dial Regulatory Gate: Before any call is dialed, our engine evaluates the local statutory window (8am-9pm US, 9am-8pm AU, 8am-8pm UK) and checks whether any member of the household cluster revoked consent. If blocked, the dial is killed pre-flight at 0 seconds and $0.00 cost.
+> 3. Production Barge-In: In real phone calls, humans interrupt. Our telephony engine hooks into native speech synthesis cancellation: the moment the customer speaks or types, the AI speech cuts off immediately without deadlocks, and the agent dynamically responds to the new input."*
+
+### Q7: Why are Lead Dossiers necessary for Human-In-The-Loop review?
+**Defense:**
+> *"Account managers cannot make defensible compliance or financial decisions from a single truncated table cell. If an AI flags a lead with '0.62 low confidence', the reviewer needs to see the exact raw payload vs normalized E.164 phone, the household cluster match (e.g. spouse who opted out), and the FinOps billing tier before clicking 'Override & Force Sync' or 'Permanent DNC Quarantine'. The Lead Dossier provides complete operational visibility and logs every manual action to an immutable audit trail."*
+
 ---
 
 ## 2. 3-Minute Live Interview Demo Script

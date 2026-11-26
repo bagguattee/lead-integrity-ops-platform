@@ -13,29 +13,29 @@
 
 ---
 
-## ⚡ 3-Minute Evaluator Cheat Sheet (For OnlineJobs.ph / Technical Reviewers)
+## ⚡ 3-Minute Evaluator Cheat Sheet (For OnlineJobs.ph / Technical Evaluators)
 
-If you have 180 seconds to test technical depth and business value, follow this exact click path:
+If you have 180 seconds to test technical depth, regulatory compliance, and business value, follow this exact click path:
 
 | Step | Action to Test | What Happens Under the Hood | Technical Proof |
 | :--- | :--- | :--- | :--- |
-| **1** | **Switch Agency Sub-Account** *(Top of Sidebar)* | Switch between `Apex Roofing TX` ($ / TCPA), `Summit Solar AU` (A$ / Spam Act), and `Thames Heating UK` (£ / PECR). | Encrypted `iron-session` changes tenant context; currency formatting, legal statutory disclaimers, and telephone masks update without page flicker. Zero IDOR risk. |
+| **1** | **Switch Agency Sub-Account** *(Top of Sidebar)* | Switch between `Apex Roofing TX` ($ / TCPA), `Summit Solar AU` (A$ / Spam Act), and `Thames Heating UK` (£ / PECR). | Encrypted `iron-session` updates server context; currency formatting, legal statutory disclaimers, and telephone masks update without page flicker. Zero IDOR risk. |
 | **2** | **Test 503 Outage Fallback** *(Ledger Card)* | Toggle `Simulate Provider Outage (503)`, then ingest a lead without property specs. | **Honest Degradation:** Instead of crashing or faking numbers, lead is safely stored as `UNENRICHED_DEGRADED` with `propertyEnrichment: null`. When toggled back, click **`Backfill Degraded Records`** to pull live specs. |
-| **3** | **Interactive 2-Way Voice AI** *(Go to `/voice`)* | Select a lead and click **`Start 2-Way Voice Call`**. Play the homeowner (mic or quick-replies) with live agent **Ash**. | Live agent runs tool calling (`check_availability`, `book_appointment`, pricing guards). Click **`Mid-Call DNC`** to test mid-call consent revocation—instantly quarantining the entire household cluster. |
+| **3** | **Interactive 2-Way Voice AI & Barge-In** *(Go to `/voice`)* | Click **`Start Live Call (You Play Customer)`**. Speak or type as homeowner. Interrupt **Ash** mid-sentence. | **Production Barge-In:** AI speech instantly halts via `speechSynthesis.cancel()`, UI accepts your reply without locking, and Ash dynamically pivots. Ash enforces pricing guardrails and autonomously invokes `check_availability` & `book_appointment`. |
 | **4** | **Pre-Dial DNC Gate** *(On `/voice`)* | Attempt to dial an opted-out homeowner (`Sarah Connor`). | Hard-blocked **before dialing (0s duration, $0.00 spend)**. Prevents $500–$2,200 statutory fines per call. |
 | **5** | **Test Server-Action RBAC** *(Bottom Sidebar)* | Click **`RBAC Test Harness`** to cycle role to `VIEWER`. Try to approve a quarantined lead or trigger an ingestion run. | The UI allows you to evaluate RBAC without creating 4 accounts. Server Action blocks the mutation and raises a **`403 Forbidden (Insufficient permissions)`** notification. |
-| **6** | **AI Ops Copilot** *(Bottom Sidebar)* | Click **`AI Ops Copilot`** and ask: *"What is our current API spend and quarantine count?"* | RAG pipeline answers strictly grounded in the active tenant's real-time PostgreSQL operational metrics. |
+| **6** | **Lead Master & Quarantine Dossiers** *(Click any row)* | Click on any Clean Master lead or Quarantined lead. | Full diagnostic dossier opens: raw vs. normalized diffs, AI Triage confidence meter, FinOps billing tier, and 1-click HITL overrides. |
 
 ---
 
-## 💼 The Commercial Problem & ROI (Why Agencies Buy This)
+## 💼 The Commercial Problem & ROI (Why High-Ticket Agencies Buy This)
 
 Agencies spending $10k–$50k/month on Meta/Google Ads and aged homeowner lead lists lose thousands of dollars every week through four critical production failure points:
 
 ```
-Raw Web Form / Meta Ad / CSV Export
-           │
-           ▼
+Raw Web Form / Meta Ad / CSV Export / Inbound Webhook
+                          │
+                          ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        INTEGRITYOPS GATEWAY                            │
 ├────────────────────────────────┬───────────────────────────────────────┤
@@ -44,20 +44,74 @@ Raw Web Form / Meta Ad / CSV Export
 │ 3. Pre-Dial DNC Compliance Gate │ Blocks TCPA / Spam Act violations     │
 │ 4. FinOps Cost Waterfall       │ Serves from $0.00 Cache vs $0.05 Live │
 │ 5. Honest 503 Provider Fallback│ Zero hallucinated data during outages │
+│ 6. 3-Tier Speed-to-Lead Triage │ Instant Voice AI vs Standard Drip     │
 └────────────────────────────────┬───────────────────────────────────────┘
-           │
-           ▼
-   Clean Sync to GHL CRM + 2-Way Voice AI Qualification (Ash)
+                          │
+         ┌────────────────┴────────────────────────┐
+         ▼                                         ▼
+   [CLEAN MASTERS]                         [HITL QUARANTINE]
+   • Routine (2-4hr Drip)                  • TCPA Opt-Outs ($500 Fine Prev)
+   • Emergency (5-Min Voice AI)            • Invalid Format / AI Low-Conf
 ```
 
 1. **Statutory Non-Compliance ($500–$2,200 fine per violation):**  
-   A homeowner submits a new solar rebate form while their spouse opted out of calls 3 weeks prior on the same household number. Naive CRMs dial anyway. **IntegrityOps links family members via Household Clustering and hard-blocks the dial before the telecom provider connects.**
+   A homeowner submits a new solar rebate form while their spouse opted out of calls 3 weeks prior on the same household number. Naive CRMs dial anyway. **IntegrityOps links family members via Household Clustering and hard-blocks the dial before telecom connection.**
 2. **Runaway Enrichment API Costs ($0.05 to $0.15 per lead):**  
    A prospect submits 3 forms across different ad campaigns. Traditional setups trigger 3 separate paid property lookups. **IntegrityOps serves repeat lookups from a $0.00 local cache and halts API billing the moment a tenant hits their monthly budget ceiling.**
 3. **Silent Data Fabrication During API Outages:**  
    When external enrichment providers 503, poorly designed systems either drop the paid lead completely or inject fake property estimates. **IntegrityOps degrades honestly: leads sync cleanly with `UNENRICHED_DEGRADED` status and queue into a 1-click backfill ledger for when the API recovers.**
 4. **Dormant Revenue Recovery:**  
-   Old CRM leads with stale quotes (>2 years) or unformatted phones sit abandoned. IntegrityOps normalizes the contact data and surfaces high-value estimates for automated **Voice AI reactivation**.
+   Old CRM leads with stale quotes (>2 years) or unformatted phones sit abandoned. IntegrityOps normalizes contact data and surfaces high-value estimates for automated **Voice AI reactivation**.
+
+---
+
+## 🎯 3-Tier Lead Triage & Speed-to-Lead Hierarchy
+
+Why not send all valid leads straight into GoHighLevel standard drip campaigns?  
+In high-ticket contracting ($12,000–$35,000 roof replacements), **Speed-to-Lead is the primary determinant of revenue**:
+
+| Lead Tier | Qualification Criteria | Routing & Action Protocol | Business Impact & ROI |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Quarantined / Compliance Hold** | TCPA opt-outs, invalid/hallucinated phone numbers, disposable emails, or AI confidence < 0.70. | **Hard-blocked from CRM sync & dialing.** Isolated into Human-In-The-Loop (HITL) Quarantine Ledger for operator audit. | **Prevents $500–$2,200 statutory fines per call.** Prevents CRM spam flags and preserves telecom sender reputation. |
+| **Tier 2: Routine Valid Leads** | Enriched, clean contact data, standard residential maintenance inquiry, normal urgency. | Synced to GoHighLevel CRM via HMAC-verified webhook. Queued into standard 2-4 hour outreach drip (email nurture + conversational SMS). | Normalizes sales team workload, warms up cold prospects, and prevents lead fatigue. |
+| **Tier 3: Emergency / High-Urgency Leads** | Active interior ceiling leaks, storm damage, commercial structural threats, or high intent ($15k+ job estimate). | **Bypasses standard drip completely.** Triggers immediate autonomous **Voice AI dispatch (Ash)** within seconds, accompanied by instant SMS alert to the on-call estimator. | **The 5-Minute Speed-to-Lead Rule:** Leads contacted within 5 minutes convert at **391% higher rates** than those contacted after 30 minutes. After 60 minutes, qualification drop-off exceeds 80%. |
+
+---
+
+## 🎙️ Real-Time Voice AI Telephony Architecture
+
+The platform features an autonomous 2-way Voice AI qualification engine powered by **Vapi** and native **Web Audio API**:
+
+```
+[Outbound Dispatch Action]
+           │
+           ▼
+[Pre-Dial Compliance Gate] ──► Blocked? ──► Terminate (0s duration, $0.00 spend)
+           │ (Clear)
+           ▼
+[Web Audio Dual-Frequency Dialing Ringtone]
+           │
+           ▼
+[Connection Chime & Live Ticking Wall-Clock Timer]
+           │
+           ▼
+┌────────────────────────────────────────────────────────┐
+│             Ash (Voice AI Qualification Agent)         │
+├────────────────────────────────────────────────────────┤
+│ • Anti-Hallucination Guard: Refuses to guess quotes     │
+│ • Autonomous Tool Calling: `check_availability`        │
+│ • Autonomous Tool Calling: `book_appointment`          │
+│ • Autonomous Tool Calling: `flag_do_not_call`          │
+│ • Production Barge-In / Interruption Engine            │
+└────────────────────────────────────────────────────────┘
+```
+
+### Production Barge-In & Interruption Handling
+* **Smooth Mid-Sentence Cutoff:** When a prospect speaks or submits a reply while the agent is talking, the platform immediately triggers `speechSynthesis.cancel()` (or Vapi cancel signal) to cut off audio instantly without UI stutter or button lockups.
+* **No Agent Lockout:** Homeowner quick-reply chips and text inputs remain active throughout the call, allowing realistic mid-sentence interruptions.
+* **Two Operating Modes:**
+  * **Interactive Mode (`You Play Customer`):** The operator plays the role of the homeowner (via microphone or interactive chips) to evaluate Ash's conversational agility, pricing defense, and booking workflows.
+  * **Automated QA Regression Replay:** Replays predefined regression scenarios (`Books Inspection`, `Mid-Call Opt-Out`, `Declines Offer`, `Voicemail Left`) turn-by-turn with speech synthesis to verify webhook settlement and compliance handlers automatically.
 
 ---
 
@@ -69,7 +123,7 @@ Raw Web Form / Meta Ad / CSV Export
   * `OWNER` / `ADMIN`: Full operational authority (quarantine overrides, FinOps policy edits, backfill execution).
   * `REVIEWER`: Human-In-The-Loop triage (approve, split household clusters, permanent quarantine).
   * `VIEWER`: Read-only access. All Server Action mutations fail-closed with `403 Forbidden`.
-* **Reviewer Test Harness:** Includes an evaluation switcher directly in the sidebar so hiring managers can immediately verify permission gates without logging in and out of 4 accounts.
+* **RBAC Test Harness:** Built directly into the sidebar (`[OWN]`, `[ADM]`, `[REV]`, `[VIE]`) so hiring managers and evaluators can immediately verify permission gates without logging in and out of 4 accounts.
 
 ### 2. FinOps Ledger & Honest Enrichment Fallback
 * **Three-Tier Fallback Hierarchy:**
@@ -81,11 +135,6 @@ Raw Web Form / Meta Ad / CSV Export
 ### 3. Scalable UI Architecture (React 19 & Next.js 15)
 * **Bounded Layouts + Sticky Headers + Pagination:** All operational tables (Ledger, Quarantine, Reactivation, Voice History) feature fixed-height containers (`max-h-[380px]`) and `8 / 25 / 50` page controls. Ingesting 1,000+ leads will never elongate or break the browser window.
 * **React 19 `useOptimistic`:** HITL quarantine actions (Approve, Split Cluster, DNC Quarantine) apply instantly in the UI while database transactions resolve asynchronously in the background.
-
-### 4. Interactive Voice AI (Vapi Integration & Pre-Dial Compliance)
-* **Real Vapi Webhook Handler (`POST /api/webhooks/vapi`):** HMAC-verified signature verification for live inbound calls, function tool calling (`check_availability`, `book_appointment`, `flag_do_not_call`), and end-of-call transcription sync.
-* **2-Way Call Simulator:** Built-in interactive console where operators can speak or type as the homeowner, conversing directly with **Ash** (including Web Speech audio synthesis).
-* **Mid-Call DNC Consent Revocation:** If a homeowner says *"Remove me from your list"*, Ash executes the `flag_do_not_call` tool call, immediately terminates the call, quarantines the phone number across all tenant campaigns, and blocks future dials.
 
 ---
 
@@ -180,13 +229,14 @@ npm start
     │   └── layout.tsx           # Global shell & font configuration
     ├── components/
     │   ├── shell-navigation.tsx # Multi-tenant switcher + Demo RBAC Test Harness
-    │   ├── dashboard-client.tsx # FinOps balance, bounded ledger & pagination
-    │   ├── voice-client.tsx     # 2-way interactive Voice AI console + Vapi simulator
-    │   ├── quarantine-table.tsx # React 19 optimistic HITL triage
+    │   ├── dashboard-client.tsx # FinOps balance, bounded ledger, Lead Master Dossier
+    │   ├── voice-client.tsx     # 2-way interactive Voice AI console + Barge-In + Vapi simulator
+    │   ├── quarantine-table.tsx # React 19 optimistic HITL triage + Lead Quarantine Dossier
     │   └── copilot-drawer.tsx   # Tenant-scoped AI Ops RAG drawer
     ├── contracts/
     │   └── lead-contracts.ts    # Zod schemas, LeadPayload, TenantSettings
     └── lib/
+        ├── audio-effects.ts     # Web Audio API ringtones, chimes, Web Speech GC & barge-in
         ├── auth.ts              # Session reading & Server Action RBAC assertion
         ├── finops.ts            # Ledger debiting & budget cap calculations
         ├── pipeline-engine.ts   # Cleansing, deduplication, and routing waterfall
