@@ -544,7 +544,11 @@ export function VoiceClient({
                 <option value="">-- Choose Lead or Type Custom Below --</option>
                 {masters.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.isTcpaOptedOut ? "🚫 [PRE-DIAL DNC BLOCKED] " : "✓ "}
+                    {m.isTcpaOptedOut
+                      ? "🚫 [PRE-DIAL DNC BLOCKED] "
+                      : m.appointmentAt
+                        ? `📅 [BOOKED: ${m.appointmentAt}] `
+                        : "✓ "}
                     {m.canonicalName} ({m.normalizedPhone || "No Phone"})
                   </option>
                 ))}

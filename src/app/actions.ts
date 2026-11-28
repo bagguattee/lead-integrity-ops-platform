@@ -20,6 +20,7 @@ import {
   updateStoreBudgetPolicy,
   updateVoiceClockMode,
   resetVoiceCallLimits,
+  resetStoreToBaseState,
 } from "@/lib/store";
 import { ClockMode, VoiceScenario } from "@/lib/voice";
 import { callGroqChat, GroqMessage } from "@/lib/llm";
@@ -783,6 +784,27 @@ export async function resetVoiceLimitsAction(params?: {
     return { ok: true, message: result.message };
   } catch (err: unknown) {
     return { ok: false, message: err instanceof Error ? err.message : "Failed to reset voice limits" };
+  }
+}
+
+export async function resetSandboxToBaseAction(): Promise<ActionResult> {
+  try {
+    await ensureStoreHydrated();
+    const session = await getCurrentSession();
+    if (session.role === "VIEWER") {
+      return { ok: false, message: "403 Forbidden: VIEWER persona cannot reset the sandbox database." };
+    }
+    resetStoreToBaseState();
+    await persistTenantStateToPostgres("apex-roofing");
+    await persistTenantStateToPostgres("summit-solar");
+    await persistTenantStateToPostgres("thames-heating");
+    revalidateAllSurfaces();
+    return {
+      ok: true,
+      message: "Sandbox successfully reset to pristine baseline seed (all test leads, runs, and call history refreshed).",
+    };
+  } catch (err: unknown) {
+    return { ok: false, message: err instanceof Error ? err.message : "Failed to reset sandbox" };
   }
 }
 

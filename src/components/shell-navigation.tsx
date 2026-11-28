@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { switchRoleAction, switchWorkspaceAction } from "@/app/actions";
+import { switchRoleAction, switchWorkspaceAction, resetSandboxToBaseAction } from "@/app/actions";
 import { UserRole } from "@/contracts/lead-contracts";
 import { WorkspaceSummary } from "@/lib/store";
 import { CopilotDrawer } from "./copilot-drawer";
@@ -18,6 +18,8 @@ import {
   ChevronDown,
   Loader2,
   PhoneCall,
+  RotateCcw,
+  Sparkles,
 } from "lucide-react";
 
 interface ShellNavigationProps {
@@ -67,6 +69,14 @@ export function ShellNavigation({
     if (nextRole === currentRole) return;
     startTransition(async () => {
       await switchRoleAction(nextRole);
+      router.refresh();
+    });
+  };
+
+  const handleResetSandbox = () => {
+    startTransition(async () => {
+      const res = await resetSandboxToBaseAction();
+      alert(res.message);
       router.refresh();
     });
   };
@@ -312,6 +322,33 @@ export function ShellNavigation({
             <p className="text-[8px] text-white/50 leading-tight">
               Reviewer tool: test 403 Server Action boundaries without re-login.
             </p>
+          </div>
+
+          {/* Evaluation Sandbox Status & Auto-Reset 12h */}
+          <div className="rounded-xl bg-[#081E6B]/60 border border-white/15 p-2 text-left space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-bold tracking-wider uppercase text-teal-300 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                Demo Sandbox
+              </span>
+              <span className="text-[8px] font-bold uppercase tracking-wider bg-white/10 text-white/80 px-1.5 py-0.5 rounded">
+                Auto-Reset 12H
+              </span>
+            </div>
+            <p className="text-[8.5px] text-white/70 leading-snug">
+              Mutate freely! Test leads and runs auto-clean back to baseline seed every 12 hours.
+            </p>
+            <button
+              type="button"
+              onClick={handleResetSandbox}
+              disabled={isSwitching || currentRole === "VIEWER"}
+              data-testid="reset-sandbox-seed-btn"
+              title="Wipe test records and reset sandbox to clean 100% reconciled baseline seed"
+              className="w-full py-1 px-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/20 text-white text-[9px] font-bold flex items-center justify-center gap-1.5 transition disabled:opacity-40 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3 text-teal-300" />
+              Reset to Base Seed
+            </button>
           </div>
         </div>
       </aside>

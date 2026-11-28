@@ -123,6 +123,7 @@ export interface LeadMasterItem {
   daysDormant: number;
   sourceChannel: string;
   createdAt: string;
+  appointmentAt?: string | null;
 }
 
 export interface LeadAliasItem {
@@ -271,6 +272,7 @@ interface GlobalStore {
   initialized: boolean;
   seq: number;
   tenants: Record<string, TenantState>;
+  lastResetAt?: string;
 }
 
 const globalForStore = globalThis as unknown as {
@@ -716,6 +718,7 @@ function createInitialStore(): GlobalStore {
     initialized: true,
     seq: 100,
     tenants: {},
+    lastResetAt: new Date().toISOString(),
   };
 
   // 1. Tenant A: Apex Roofing TX (US Agency Sub-Account)
@@ -1762,6 +1765,7 @@ export async function dispatchVoiceCallAction(params: {
   // If appointment was booked, update master status and add ledger transaction
   if (analysis.appointmentAt && matchedMaster) {
     matchedMaster.status = "SYNCED_TO_GHL";
+    matchedMaster.appointmentAt = analysis.appointmentAt;
     tenant.ledger.unshift({
       id: nextId(store, "tx"),
       tenantSlug: tenant.slug,
@@ -2013,6 +2017,7 @@ function settleVoiceCallSideEffects(
 
   if (analysis.appointmentAt && matchedMaster) {
     matchedMaster.status = "SYNCED_TO_GHL";
+    matchedMaster.appointmentAt = analysis.appointmentAt;
     tenant.ledger.unshift({
       id: nextId(store, "tx"),
       tenantSlug: tenant.slug,
@@ -2372,11 +2377,32 @@ const globalHydration = globalThis as unknown as {
   __integrityDbHydrated?: boolean;
 };
 
+export function resetStoreToBaseState(): GlobalStore {
+  const fresh = createInitialStore();
+  fresh.lastResetAt = new Date().toISOString();
+  globalForStore.__leadIntegrityStore = fresh;
+  return fresh;
+}
+
 export async function ensureStoreHydrated(): Promise<void> {
   if (globalHydration.__integrityDbHydrated) return;
   globalHydration.__integrityDbHydrated = true;
 
   const persisted = await loadSnapshotFromPostgres<GlobalStore>();
+  const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+
+  // Auto-cleansing TTL: if persisted snapshot is >12 hours old, reset back to baseline seed
+  if (
+    persisted?.lastResetAt &&
+    Date.now() - new Date(persisted.lastResetAt).getTime() > TWELVE_HOURS_MS
+  ) {
+    const fresh = resetStoreToBaseState();
+    await persistTenantStateToPostgres("apex-roofing");
+    await persistTenantStateToPostgres("summit-solar");
+    await persistTenantStateToPostgres("thames-heating");
+    return;
+  }
+
   if (persisted && persisted.initialized && persisted.tenants?.["apex-roofing"]) {
     // Ensure backwards-compatible defaults for newly added fields
     (["apex-roofing", "summit-solar", "thames-heating"] as const).forEach((slug) => {

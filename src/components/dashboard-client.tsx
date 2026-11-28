@@ -37,6 +37,7 @@ import {
   Phone,
   Mail,
   PhoneCall,
+  Calendar,
 } from "lucide-react";
 
 interface DashboardClientProps {
@@ -1150,11 +1151,21 @@ export function DashboardClient({
                   <ShieldCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-bold text-[#172554]">{inspectMaster.canonicalName}</h3>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
                       {inspectMaster.status}
                     </span>
+                    {inspectMaster.appointmentAt && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-teal-600 text-white flex items-center gap-1">
+                        <Calendar className="w-3 h-3" /> Booked: {inspectMaster.appointmentAt}
+                      </span>
+                    )}
+                    {inspectMaster.isTcpaOptedOut && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-600 text-white flex items-center gap-1">
+                        <ShieldAlert className="w-3 h-3" /> DNC Opt-Out
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] font-mono text-slate-500">
                     Master ID: {inspectMaster.id} • {tenant.name}
@@ -1195,6 +1206,75 @@ export function DashboardClient({
                     {inspectMaster.rawAddress || "742 Evergreen Terrace, Austin TX"}
                   </span>
                 </div>
+              </div>
+
+              {/* Voice AI Qualification & TCPA Consent Status */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                    <PhoneCall className="w-4 h-4 text-teal-600" /> Voice AI Qualification Status
+                  </span>
+                  {inspectMaster.appointmentAt ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      ✓ Inspection Booked
+                    </span>
+                  ) : inspectMaster.isTcpaOptedOut ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                      🚫 Pre-Dial Hard Block
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800">
+                      Ready For Outbound
+                    </span>
+                  )}
+                </div>
+
+                {inspectMaster.appointmentAt ? (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-xs flex items-center justify-between">
+                    <div>
+                      <p className="font-bold flex items-center gap-1.5">
+                        <Calendar className="w-4 h-4 text-emerald-600" />
+                        Inspection Slot: {inspectMaster.appointmentAt}
+                      </p>
+                      <p className="text-[11px] text-emerald-700 mt-0.5">
+                        Qualified autonomously by Ash and synced to GoHighLevel dispatch calendar.
+                      </p>
+                    </div>
+                    <Link
+                      href="/voice"
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-[10px] hover:bg-emerald-700 transition"
+                    >
+                      View Transcript
+                    </Link>
+                  </div>
+                ) : inspectMaster.isTcpaOptedOut ? (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 text-xs">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <ShieldAlert className="w-4 h-4 text-rose-600" />
+                      TCPA Consent Revoked (Do-Not-Call)
+                    </p>
+                    <p className="text-[11px] text-rose-700 mt-0.5">
+                      Mid-call opt-out recorded. All future outbound dialing attempts will be hard-blocked by the Pre-Dial Gate at 0s duration and $0.00 spend.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-slate-800">
+                        Pre-dial calling window permitted (8:00 AM – 9:00 PM local time).
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        High-urgency speed-to-lead qualification ready.
+                      </p>
+                    </div>
+                    <Link
+                      href="/voice"
+                      className="px-2.5 py-1 rounded-lg bg-teal-600 text-white font-bold text-[10px] hover:bg-teal-700 transition"
+                    >
+                      Dial with Ash →
+                    </Link>
+                  </div>
+                )}
               </div>
 
               {/* Property Enrichment & FinOps Specs */}
