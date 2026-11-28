@@ -100,7 +100,7 @@ export function ShellNavigation({
 
   return (
     <>
-      <aside className="w-[232px] flex-shrink-0 sidebar-ocean-gradient text-white flex flex-col justify-between select-none relative z-20 shadow-[4px_0_24px_rgba(8,30,107,0.12)]">
+      <aside className="w-[232px] h-full flex-shrink-0 sidebar-ocean-gradient text-white flex flex-col justify-between select-none relative z-20 shadow-[4px_0_24px_rgba(8,30,107,0.12)] overflow-y-auto overflow-x-hidden">
         <div>
           {/* Brand Logo */}
           <div className="px-6 pt-7 pb-5 flex items-center gap-2.5">

@@ -1,6 +1,7 @@
 import { getCurrentSession } from "@/lib/auth";
 import { ensureStoreHydrated, getTenantSnapshot, listWorkspaceSummaries } from "@/lib/store";
 import { ShellNavigation } from "@/components/shell-navigation";
+import { TopDemoBanner } from "@/components/top-demo-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,12 @@ export default async function DashboardLayout({
         workspaces={workspaces}
       />
 
-      <main className="flex-1 min-w-0 overflow-y-auto bg-[#F4F7FC]">
-        {children}
-      </main>
+      <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden bg-[#F4F7FC]">
+        <TopDemoBanner currentRole={session.role} tenantName={snapshot.tenant.name} />
+        <main className="flex-1 min-w-0 overflow-y-auto bg-[#F4F7FC]">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
