@@ -22,6 +22,7 @@ import {
   resetVoiceCallLimits,
 } from "@/lib/store";
 import { ClockMode, VoiceScenario } from "@/lib/voice";
+import { callGroqChat, GroqMessage } from "@/lib/llm";
 import { RawInboundLead, SupportedLocale, UserRole } from "@/contracts/lead-contracts";
 
 export interface ActionResult<T = unknown> {
@@ -391,11 +392,13 @@ export async function dispatchReactivationAction(masterId: string): Promise<Acti
   }
 }
 
-export async function askWorkspaceCopilotAction(question: string): Promise<ActionResult<{ answer: string; tokensUsed: number }>> {
+export async function askWorkspaceCopilotAction(
+  question: string,
+  history: Array<{ role: "user" | "assistant"; text: string }> = []
+): Promise<ActionResult<{ answer: string; tokensUsed: number; provider: "groq" | "deterministic"; model?: string }>> {
   await ensureStoreHydrated();
   const session = await getCurrentSession();
   const snap = getTenantSnapshot(session.tenantSlug);
-  const q = question.toLowerCase();
   const curr = snap.tenant.currencySymbol;
 
   const { totalInbound, cleanMasters, mergedAliases, activeQuarantine, permanentQuarantine } =
@@ -404,8 +407,167 @@ export async function askWorkspaceCopilotAction(question: string): Promise<Actio
   const cap = (snap.tenant.budget.monthlyCapCents / 100).toFixed(2);
   const saved = (snap.tenant.budget.cacheSavingsCents / 100).toFixed(2);
 
+  // Build rich, PII-redacted operational telemetry for grounded RAG
+  const dormantLeads = snap.tenant.masters.filter((m) => m.daysDormant >= 730 || m.status === "DORMANT");
+  const dormantTotal = dormantLeads.reduce((acc, m) => acc + m.estimatedValue, 0);
+  const highUrgencyLeads = snap.tenant.masters.filter(
+    (m) => m.intentCategory === "EMERGENCY_STORM" || m.intentCategory === "HIGH_INTENT"
+  );
+  const highUrgencyTotal = highUrgencyLeads.reduce((acc, m) => acc + m.estimatedValue, 0);
+  const calls = snap.tenant.voice?.calls || [];
+  const bookedCalls = calls.filter((c) => c.outcome === "APPOINTMENT_BOOKED").length;
+  const optedOutCalls = calls.filter((c) => c.outcome === "OPTED_OUT").length;
+  const blockedCalls = calls.filter((c) => c.status === "BLOCKED").length;
+
+  const quarantineByReason: Record<string, number> = {};
+  snap.tenant.quarantine
+    .filter((item) => !item.resolved)
+    .forEach((item) => {
+      quarantineByReason[item.reason] = (quarantineByReason[item.reason] || 0) + 1;
+    });
+
+  const ragContext = {
+    tenant: {
+      name: snap.tenant.name,
+      slug: snap.tenant.slug,
+      locale: snap.tenant.localeDefault,
+      currencySymbol: curr,
+      complianceLaw: snap.tenant.complianceLaw,
+      phonePrefix: snap.tenant.phonePrefix,
+      activeRole: session.role,
+    },
+    reconciliation: {
+      totalInbound,
+      cleanMasters,
+      mergedAliases,
+      activeQuarantine,
+      permanentQuarantine,
+      systemFailures: snap.reconciliation.systemFailures,
+      isReconciled: snap.reconciliation.isReconciled,
+    },
+    pipeline: {
+      totalCleanPipelineValue: snap.pipelineValue,
+      dormantLeadsCount: dormantLeads.length,
+      dormantPipelineValue: dormantTotal,
+      dormantLeads: dormantLeads.slice(0, 12).map((m) => ({
+        name: m.canonicalName,
+        estimatedValue: m.estimatedValue,
+        daysDormant: m.daysDormant,
+        status: m.status,
+        intentCategory: m.intentCategory,
+        triageScore: m.triageScore,
+      })),
+      highUrgencyLeadsCount: highUrgencyLeads.length,
+      highUrgencyPipelineValue: highUrgencyTotal,
+      topCleanMasters: [...snap.tenant.masters]
+        .sort((a, b) => b.estimatedValue - a.estimatedValue)
+        .slice(0, 8)
+        .map((m) => ({
+          name: m.canonicalName,
+          estimatedValue: m.estimatedValue,
+          intentCategory: m.intentCategory,
+          triageScore: m.triageScore,
+          enrichmentStatus: m.enrichmentStatus,
+          daysDormant: m.daysDormant,
+          status: m.status,
+          isTcpaOptedOut: m.isTcpaOptedOut,
+        })),
+    },
+    finops: {
+      currentSpend: `${curr}${spend}`,
+      monthlyCap: `${curr}${cap}`,
+      cacheSavings: `${curr}${saved}`,
+      cacheEntriesCount: snap.businessImpact.cacheEntriesCount,
+      unenrichedPendingCount: snap.businessImpact.unenrichedPendingCount,
+      circuitBreakerStatus: snap.tenant.budget.isApiDown
+        ? "API_503_OUTAGE_DEGRADED"
+        : snap.tenant.budget.isPaused
+          ? "PAUSED_CACHE_ONLY"
+          : "ACTIVE",
+    },
+    quarantine: {
+      activeCount: activeQuarantine,
+      permanentCount: permanentQuarantine,
+      tcpaBlockedCount: snap.businessImpact.tcpaBlockedCount,
+      tcpaLiabilityProtected: `${curr}${snap.businessImpact.tcpaLiabilityProtected.toLocaleString()}`,
+      reasonBreakdown: quarantineByReason,
+      activeItems: snap.tenant.quarantine
+        .filter((item) => !item.resolved)
+        .slice(0, 10)
+        .map((item) => ({
+          name: item.normalizedPreview.canonicalName,
+          reason: item.reason,
+          estimatedValue: item.normalizedPreview.estimatedValue,
+          confidenceScore: item.normalizedPreview.triageConfidence,
+          piiRedacted: item.reason === "DNC_CLUSTER",
+        })),
+    },
+    voiceAi: {
+      agentName: snap.tenant.voice?.config.agentName || "Ash",
+      totalCalls: calls.length,
+      bookedAppointments: bookedCalls,
+      midCallOptOuts: optedOutCalls,
+      preDialGateBlocks: blockedCalls,
+      recentCalls: calls.slice(0, 6).map((c) => ({
+        contactName: c.contactName,
+        status: c.status,
+        outcome: c.outcome,
+        appointmentAt: c.appointmentAt,
+        optOutDetected: c.optOutDetected,
+      })),
+    },
+    runsCount: snap.tenant.runs.length,
+  };
+
+  // 1. Live Production Path: Groq LLM grounded strictly in active tenant telemetry
+  const systemPrompt = [
+    `You are the IntegrityOps Workspace Copilot for "${snap.tenant.name}" (${snap.tenant.localeDefault}, ${snap.tenant.complianceLaw}).`,
+    `Answer the operator's question using ONLY the verified live tenant telemetry JSON below.`,
+    `Rules:`,
+    `- Be direct, concise (2-5 sentences or tight bullet points), executive, and accurate.`,
+    `- Always format money with "${curr}" and cite exact counts/names from the JSON.`,
+    `- Never invent records, numbers, or PII. Raw DNC phone numbers/emails are redacted by policy.`,
+    `- If the user asks about something not present in the telemetry, say so clearly and point them to the closest real metric.`,
+    `\nLIVE TENANT TELEMETRY JSON:\n${JSON.stringify(ragContext)}`,
+  ].join("\n");
+
+  const llmMessages: GroqMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...history.slice(-6).map((m) => ({
+      role: m.role,
+      content: m.text,
+    })),
+    { role: "user", content: question.trim() },
+  ];
+
+  const groqRes = await callGroqChat({
+    messages: llmMessages,
+    temperature: 0.2,
+    maxTokens: 380,
+    timeoutMs: 7000,
+  });
+
+  if (groqRes.ok && groqRes.content) {
+    return {
+      ok: true,
+      message: "Copilot response generated via Groq",
+      data: {
+        answer: groqRes.content,
+        tokensUsed: groqRes.tokensUsed ?? 220,
+        provider: "groq",
+        model: groqRes.model,
+      },
+    };
+  }
+
+  // 2. Resilient Deterministic Fallback (when GROQ_API_KEY is missing or offline)
+  const q = question.toLowerCase();
+  const wantsDormant =
+    q.includes("dormant") || q.includes("reactivat") || q.includes("aged") || q.includes("stale") || q.includes("old lead");
+  const wantsUrgent =
+    q.includes("urgent") || q.includes("emergency") || q.includes("high intent") || q.includes("priority") || q.includes("biggest") || q.includes("top lead");
   const wantsQuarantine =
-    q.includes("quarantine") || q.includes("dnc") || q.includes("hub") || q.includes("blocked");
+    q.includes("quarantine") || q.includes("dnc") || q.includes("hub") || q.includes("blocked") || q.includes("compliance");
   const wantsFinops =
     q.includes("spend") || q.includes("budget") || q.includes("finops") || q.includes("cost") || q.includes("cap");
   const wantsEnrichment =
@@ -418,10 +580,27 @@ export async function askWorkspaceCopilotAction(question: string): Promise<Actio
     q.includes("equation") ||
     q.includes("inbound") ||
     q.includes("summary") ||
-    (!wantsQuarantine && !wantsFinops && !wantsEnrichment && !wantsVoice);
+    (!wantsDormant && !wantsUrgent && !wantsQuarantine && !wantsFinops && !wantsEnrichment && !wantsVoice);
 
   const segments: string[] = [];
 
+  if (wantsDormant) {
+    const names = dormantLeads
+      .map((m) => `${m.canonicalName} (${curr}${m.estimatedValue.toLocaleString()}, ${m.daysDormant}d)`)
+      .join(", ");
+    segments.push(
+      `Dormant Pipeline (${snap.tenant.name}): ${curr}${dormantTotal.toLocaleString()} across ${dormantLeads.length} dormant lead(s) aged ≥730 days${names ? ` — ${names}` : ""}.`
+    );
+  }
+  if (wantsUrgent) {
+    const names = highUrgencyLeads
+      .slice(0, 5)
+      .map((m) => `${m.canonicalName} (${m.intentCategory}, ${curr}${m.estimatedValue.toLocaleString()})`)
+      .join(", ");
+    segments.push(
+      `High-Urgency Pipeline: ${curr}${highUrgencyTotal.toLocaleString()} across ${highUrgencyLeads.length} priority lead(s)${names ? ` — ${names}` : ""}.`
+    );
+  }
   if (wantsReconciliation) {
     segments.push(
       `Reconciliation (${snap.tenant.name}, ${snap.tenant.phonePrefix}): ${totalInbound} Total Inbound = ${cleanMasters} Clean Masters + ${mergedAliases} Merged Duplicates + ${activeQuarantine + permanentQuarantine} Quarantined + 0 System Failures (100% verified, ${curr}${snap.pipelineValue.toLocaleString()} clean pipeline, ${curr}${snap.businessImpact.tcpaLiabilityProtected.toLocaleString()} compliance liability protected).`
@@ -444,23 +623,13 @@ export async function askWorkspaceCopilotAction(question: string): Promise<Actio
     );
   }
   if (wantsVoice) {
-    const calls = snap.tenant.voice?.calls || [];
-    const booked = calls.filter((c) => c.outcome === "APPOINTMENT_BOOKED").length;
-    const optedOut = calls.filter((c) => c.outcome === "OPTED_OUT").length;
-    const blocked = calls.filter((c) => c.status === "BLOCKED").length;
     segments.push(
-      `Voice AI Ledger (${snap.tenant.voice?.config.agentName || "Ash"}): ${calls.length} total call event(s) — ${booked} booked, ${optedOut} mid-call DNC revocations, ${blocked} pre-dial gate blocks.`
+      `Voice AI Ledger (${snap.tenant.voice?.config.agentName || "Ash"}): ${calls.length} total call event(s) — ${bookedCalls} booked, ${optedOutCalls} mid-call DNC revocations, ${blockedCalls} pre-dial gate blocks.`
     );
   }
   if (wantsQuarantine) {
-    const byReason: Record<string, number> = {};
-    snap.tenant.quarantine
-      .filter((item) => !item.resolved)
-      .forEach((item) => {
-        byReason[item.reason] = (byReason[item.reason] || 0) + 1;
-      });
     const breakdown =
-      Object.entries(byReason)
+      Object.entries(quarantineByReason)
         .map(([k, v]) => `${k}: ${v}`)
         .join(", ") || "0 pending items";
     segments.push(
@@ -468,12 +637,10 @@ export async function askWorkspaceCopilotAction(question: string): Promise<Actio
     );
   }
 
-  const answer = segments.join(" ");
-
   return {
     ok: true,
-    message: "Copilot response generated",
-    data: { answer, tokensUsed: 142 },
+    message: "Copilot response generated (deterministic fallback)",
+    data: { answer: segments.join(" "), tokensUsed: 0, provider: "deterministic" },
   };
 }
 
@@ -528,7 +695,7 @@ export async function sendInteractiveVoiceReplyAction(params: {
   try {
     await ensureStoreHydrated();
     const session = await getCurrentSession();
-    const result = sendInteractiveVoiceReply({
+    const result = await sendInteractiveVoiceReply({
       slugOrId: session.tenantSlug,
       role: session.role,
       actorName: session.userName,

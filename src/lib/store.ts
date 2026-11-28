@@ -15,7 +15,7 @@ import {
   costForDuration,
   createVoiceState,
   defaultVoiceConfig,
-  evaluateInteractiveCustomerTurn,
+  evaluateInteractiveCustomerTurnAsync,
   evaluatePreDialGate,
   getVapiEnvStatus,
   placeVapiCall,
@@ -2162,13 +2162,13 @@ export function startInteractiveVoiceCall(params: {
   return { ok: true, callRecord: activeCall };
 }
 
-export function sendInteractiveVoiceReply(params: {
+export async function sendInteractiveVoiceReply(params: {
   slugOrId: string;
   role: UserRole;
   actorName: string;
   callId: string;
   customerMessage: string;
-}): { ok: boolean; callRecord: CallRecord } {
+}): Promise<{ ok: boolean; callRecord: CallRecord }> {
   if (params.role === "VIEWER") {
     throw new Error("403 Forbidden: VIEWER role cannot interact with active voice sessions.");
   }
@@ -2185,13 +2185,14 @@ export function sendInteractiveVoiceReply(params: {
   const nextSec = call.durationSec + 8;
   call.transcript.push({ role: "customer", text: params.customerMessage.trim(), atSec: nextSec });
 
-  const turn = evaluateInteractiveCustomerTurn({
+  const turn = await evaluateInteractiveCustomerTurnAsync({
     customerMessage: params.customerMessage,
     contactName: call.contactName,
     tenantName: tenant.name,
     locale: tenant.localeDefault,
     config: tenant.voice.config,
     existingToolEvents: call.toolEvents,
+    transcript: call.transcript,
     now: new Date(),
   });
 

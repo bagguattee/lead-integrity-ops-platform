@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { SupportedLocale } from "../contracts/lead-contracts";
+import { callGroqChat, isGroqConfigured } from "./llm";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Voice AI domain layer (pure, framework-free, deterministic where it matters)
@@ -306,6 +307,21 @@ export function buildSlots(now: Date, locale: SupportedLocale): string[] {
   return slots;
 }
 
+export function buildExtendedSlots(now: Date, locale: SupportedLocale): string[] {
+  const tz = VOICE_POLICY[locale].timeZone;
+  const monthFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" });
+  const times = ["10:00", "14:00", "11:00", "15:30"];
+  const slots: string[] = [];
+  let cursor = new Date(now.getTime());
+  for (let i = 0; i < 14 && slots.length < 4; i++) {
+    cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
+    const c = localClock(cursor, tz);
+    if (c.weekday === 0 || c.weekday === 6) continue;
+    slots.push(`${c.weekdayName} ${monthFmt.format(cursor)}, ${times[slots.length]}`);
+  }
+  return slots;
+}
+
 export interface MockCallBuild {
   transcript: TranscriptTurn[];
   toolEvents: ToolEvent[];
@@ -484,8 +500,12 @@ export interface InteractiveTurnResult {
 
 const HUMAN_TRANSFER_RE = /(human|manager|supervisor|real person|speak to someone|billing|dispute|lawyer|attorney|sue)/i;
 const PRICING_RE = /(how much|price|cost|quote|expensive|estimate|ballpark|\$)/i;
-const CONFIRM_SLOT_RE = /(first|10:00|10 am|morning|second|14:00|2:00|2 pm|afternoon|works for me|sounds good|book it|confirm|yes please|sure|let's do|that works)/i;
-const GREET_OR_OPEN_RE = /(yes|yeah|sure|go ahead|who is this|speaking|available|slots|times|when|schedule|inspect|book|hello|hi)/i;
+const NEGATION_RE = /\b(not|nah|nope|neither|none|can'?t|cannot|won'?t|don'?t|doesn'?t|busy|unavailable)\b/i;
+const UNAVAILABLE_SLOTS_RE =
+  /(not available|neither|both|none of (those|them)|different (day|time)|later in the week|other (day|time|slot)|can'?t (make|do)|won'?t work|don'?t work|doesn'?t work|busy)/i;
+const SOFT_DECLINE_RE = /^(nah|nope|no thanks|pass|not really|not right now|maybe later)\b/i;
+const CONFIRM_SLOT_RE = /(first|10:00|10 am|morning|second|14:00|2:00|2 pm|afternoon|works for me|sounds good|book it|confirm|yes please|let's do|that works)/i;
+const GREET_OR_OPEN_RE = /(yes|yeah|sure|go ahead|who is this|speaking|slots|times|when|schedule|inspect|book|hello|hi)/i;
 
 /**
  * Real-time interactive agent response engine for 2-way call testing
@@ -604,8 +624,8 @@ export function evaluateInteractiveCustomerTurn(params: {
     };
   }
 
-  // 5. Slot confirmation -> Book Appointment tool!
-  if (hasCheckedAvailability && !hasBooked && CONFIRM_SLOT_RE.test(msg)) {
+  // 5. Slot confirmation -> Book Appointment tool! (Never fire if negated)
+  if (hasCheckedAvailability && !hasBooked && CONFIRM_SLOT_RE.test(msg) && !NEGATION_RE.test(msg)) {
     const pickedSecond = /(second|14:00|2:00|2 pm|afternoon|later)/i.test(msg);
     const chosenSlot = pickedSecond ? slotB : slotA;
     return {
@@ -617,6 +637,27 @@ export function evaluateInteractiveCustomerTurn(params: {
           result: `Confirmed ${chosenSlot}`,
         },
       ],
+      shouldEndCall: false,
+    };
+  }
+
+  // 5b. Customer not available for offered slots -> offer alternative days/times instead of looping!
+  if (UNAVAILABLE_SLOTS_RE.test(msg)) {
+    const ext = buildExtendedSlots(params.now, params.locale);
+    const altA = ext[2] || "later this week in the morning";
+    const altB = ext[3] || "later this week in the afternoon";
+    return {
+      agentReply: `No problem at all, ${first}! If those don't fit your schedule, we also have ${altA} or ${altB} open — or tell me what day and time works best for you.`,
+      newToolEvents: [],
+      shouldEndCall: false,
+    };
+  }
+
+  // 5c. Soft decline ("nah", "nope", "not right now") -> graceful check-in instead of repeating slots
+  if (SOFT_DECLINE_RE.test(msg)) {
+    return {
+      agentReply: `Totally fair, ${first} — is it just bad timing right now, or would you prefer I close out this inquiry so we don't keep bugging you?`,
+      newToolEvents: [],
       shouldEndCall: false,
     };
   }
@@ -658,7 +699,7 @@ export function evaluateInteractiveCustomerTurn(params: {
   }
 
   // 8. Opening / Availability inquiry -> check_availability tool
-  if (GREET_OR_OPEN_RE.test(msg) || !hasCheckedAvailability) {
+  if ((GREET_OR_OPEN_RE.test(msg) && !NEGATION_RE.test(msg)) || !hasCheckedAvailability) {
     const tools: ToolEvent[] = [];
     if (!hasCheckedAvailability) {
       tools.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
@@ -671,10 +712,180 @@ export function evaluateInteractiveCustomerTurn(params: {
   }
 
   return {
-    agentReply: `Got it, ${first}. Would you like me to lock in ${slotA} or ${slotB} for the free on-site ${service}?`,
+    agentReply: `Got it, ${first}. What day or time this week would work best for a quick 15-minute ${service}, or would you prefer I follow up later?`,
     newToolEvents: [],
     shouldEndCall: false,
   };
+}
+
+/**
+ * Production LLM-backed interactive voice turn evaluator.
+ *
+ * Architecture:
+ *  1. Deterministic compliance & anti-hallucination guards ALWAYS execute first
+ *     (DNC opt-out revocation, human transfer, pricing guard, explicit slot confirmation).
+ *  2. All natural conversation, objections ("nah", "not available for both"),
+ *     and custom scheduling are handled by Groq Llama 3.3 70B with full transcript
+ *     memory and structured JSON tool-calling.
+ *  3. Automatically falls back to the deterministic state machine if GROQ_API_KEY
+ *     is unset or unreachable.
+ */
+export async function evaluateInteractiveCustomerTurnAsync(params: {
+  customerMessage: string;
+  contactName: string;
+  tenantName: string;
+  locale: SupportedLocale;
+  config: VoiceAgentConfig;
+  existingToolEvents: ToolEvent[];
+  transcript: TranscriptTurn[];
+  now: Date;
+}): Promise<InteractiveTurnResult> {
+  const msg = params.customerMessage.trim();
+  const first = params.contactName.split(/\s+/)[0] || "there";
+  const service = serviceLabel(params.locale);
+  const allSlots = buildExtendedSlots(params.now, params.locale);
+  const [slotA, slotB, slotC, slotD] = allSlots;
+  const hasCheckedAvailability = params.existingToolEvents.some((e) => e.name === "check_availability");
+  const hasBooked = params.existingToolEvents.some((e) => e.name === "book_appointment");
+
+  // ── LAYER 1: Hard Deterministic Compliance & Safety Guards ──
+  if (OPT_OUT_RE.test(msg)) {
+    return evaluateInteractiveCustomerTurn(params);
+  }
+  if (HUMAN_TRANSFER_RE.test(msg)) {
+    return evaluateInteractiveCustomerTurn(params);
+  }
+  if (PRICING_RE.test(msg)) {
+    return evaluateInteractiveCustomerTurn(params);
+  }
+  const mentionsCustomSchedule =
+    /\b(wednesday|thursday|friday|saturday|sunday|wed|thu|fri|sat|sun|next week|3\s?pm|4\s?pm|5\s?pm|9\s?am|11\s?am|noon|15:30)\b/i.test(
+      msg
+    );
+  if (
+    hasCheckedAvailability &&
+    !hasBooked &&
+    CONFIRM_SLOT_RE.test(msg) &&
+    !NEGATION_RE.test(msg) &&
+    !mentionsCustomSchedule
+  ) {
+    return evaluateInteractiveCustomerTurn(params);
+  }
+
+  // ── LAYER 2: Live Groq LLM Conversational Reasoning + Tool Calling ──
+  if (isGroqConfigured()) {
+    const transcriptText = params.transcript
+      .slice(-10)
+      .map((t) => `${t.role === "agent" ? params.config.agentName : first}: ${t.text}`)
+      .join("\n");
+
+    const llmSystem = [
+      `You are ${params.config.agentName}, a warm, natural, concise AI phone qualification assistant calling on behalf of ${params.tenantName} about a free on-site ${service}.`,
+      `Base instructions: ${params.config.systemPrompt}`,
+      `Open technician slots: Primary = [${slotA}, ${slotB}]; Alternatives = [${slotC}, ${slotD}].`,
+      `Already checked availability: ${hasCheckedAvailability}. Already booked: ${hasBooked}.`,
+      `CRITICAL CONVERSATION RULES:`,
+      `- Sound like a real human on the phone: 1-2 short, natural spoken sentences. NEVER use markdown, bullet points, or robotic repetition.`,
+      `- NEVER repeat the AI/recording disclosure if you already said it or if the call is past turn 1.`,
+      `- NEVER quote or guess prices over the phone. Always pivot to the free 15-minute on-site inspection.`,
+      `- If the customer says "nah", "not interested", or declines politely, DO NOT push the same slots again — ask briefly if they want to close the inquiry or prefer a callback later, or politely end the call if they clearly decline.`,
+      `- If the customer says they are not available for the first two slots (e.g. "im not available for both"), immediately apologize/acknowledge and offer the alternative slots (${slotC} or ${slotD}) OR ask what day/time works for them.`,
+      `- If the customer proposes ANY specific day/time (e.g. "Friday at 3pm", "Wednesday morning"), confirm and book that slot via BOOK_APPOINTMENT!`,
+      `- If the customer revokes consent / asks to stop calling, return action FLAG_DNC.`,
+      `- If the customer asks for a human/manager/specialist, return action TRANSFER_HUMAN.`,
+      `Return ONLY valid JSON matching this schema:`,
+      `{"reply":"string","action":"NONE|CHECK_AVAILABILITY|BOOK_APPOINTMENT|FLAG_DNC|TRANSFER_HUMAN|END_CALL_DECLINED|END_CALL_CALLBACK","slot":"optional string if BOOK_APPOINTMENT"}`,
+    ].join("\n");
+
+    const groqRes = await callGroqChat({
+      messages: [
+        { role: "system", content: llmSystem },
+        {
+          role: "user",
+          content: `CONVERSATION SO FAR:\n${transcriptText}\n\nRespond to ${first}'s latest message ("${msg}") as JSON.`,
+        },
+      ],
+      temperature: 0.35,
+      maxTokens: 220,
+      jsonMode: true,
+      timeoutMs: 6000,
+    });
+
+    if (groqRes.ok && groqRes.content) {
+      try {
+        const parsed = JSON.parse(groqRes.content) as {
+          reply?: string;
+          action?: string;
+          slot?: string;
+        };
+        const reply = (parsed.reply || "").trim();
+        const action = (parsed.action || "NONE").toUpperCase();
+
+        if (reply.length > 0) {
+          const newToolEvents: ToolEvent[] = [];
+          let shouldEndCall = false;
+          let endedReason: string | undefined;
+
+          if (action === "FLAG_DNC") {
+            newToolEvents.push({
+              name: "flag_do_not_call",
+              args: { reason: "mid_call_customer_revocation", utterance: msg.slice(0, 80) },
+              result: "DNC flag applied + household cluster quarantined",
+            });
+            shouldEndCall = true;
+            endedReason = "customer-revoked-consent-dnc";
+          } else if (action === "TRANSFER_HUMAN") {
+            newToolEvents.push({
+              name: "transfer_to_human",
+              args: { targetNumber: params.config.transferNumber, reason: "customer_requested_specialist" },
+              result: `Warm transfer initiated to ${params.config.transferNumber}`,
+            });
+            shouldEndCall = true;
+            endedReason = "transferred-to-human";
+          } else if (action === "BOOK_APPOINTMENT" && !hasBooked) {
+            const chosenSlot = (parsed.slot && parsed.slot.trim()) || slotA;
+            if (!hasCheckedAvailability) {
+              newToolEvents.push({ name: "check_availability", args: {}, result: `Slots: ${slotA}; ${slotB}` });
+            }
+            newToolEvents.push({
+              name: "book_appointment",
+              args: { slot: chosenSlot, name: params.contactName },
+              result: `Confirmed ${chosenSlot}`,
+            });
+          } else if (action === "CHECK_AVAILABILITY" && !hasCheckedAvailability) {
+            newToolEvents.push({
+              name: "check_availability",
+              args: {},
+              result: `Slots: ${slotA}; ${slotB}; ${slotC}; ${slotD}`,
+            });
+          } else if (action === "END_CALL_DECLINED") {
+            // Never hang up mid-conversation if the agent just asked the customer a question
+            if (!reply.endsWith("?")) {
+              shouldEndCall = true;
+              endedReason = "customer-declined";
+            }
+          } else if (action === "END_CALL_CALLBACK") {
+            if (!reply.endsWith("?")) {
+              shouldEndCall = true;
+              endedReason = "callback-requested";
+            }
+          }
+
+          return {
+            agentReply: reply,
+            newToolEvents,
+            shouldEndCall,
+            endedReason,
+          };
+        }
+      } catch {
+        // Fall through to deterministic state machine on JSON parse error
+      }
+    }
+  }
+
+  // ── LAYER 3: Upgraded Deterministic Fallback ──
+  return evaluateInteractiveCustomerTurn(params);
 }
 
 /* ───────────────────────────── Vapi (live provider) ──────────────────────── */

@@ -15,6 +15,8 @@ interface Message {
   role: "assistant" | "user";
   text: string;
   tokens?: number;
+  provider?: "groq" | "deterministic";
+  model?: string;
 }
 
 export function CopilotDrawer({
@@ -46,18 +48,22 @@ export function CopilotDrawer({
   const sendPrompt = (questionText: string) => {
     const trimmed = questionText.trim();
     if (!trimmed || isPending) return;
+    const historySnapshot = messages
+      .slice(-6)
+      .map((m) => ({ role: m.role, text: m.text }));
     setMessages((prev) => [...prev, { role: "user", text: trimmed }]);
     setInput("");
 
     startTransition(async () => {
-      await new Promise((r) => setTimeout(r, 250));
-      const res = await askWorkspaceCopilotAction(trimmed);
+      const res = await askWorkspaceCopilotAction(trimmed, historySnapshot);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
           text: res.data?.answer || res.message,
           tokens: res.data?.tokensUsed,
+          provider: res.data?.provider,
+          model: res.data?.model,
         },
       ]);
     });
@@ -93,6 +99,7 @@ export function CopilotDrawer({
         <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-[#F6F9FD]">
           <div className="flex flex-wrap gap-1.5 pb-2">
             {[
+              "How much value is sitting in dormant leads?",
               "Is the reconciliation equation balanced?",
               "Show current FinOps spend vs cap",
               "Any unenriched leads waiting for backfill?",
@@ -119,10 +126,12 @@ export function CopilotDrawer({
                   : "bg-white border border-[#E6ECF5] text-[#172554] mr-6 rounded-bl-sm shadow-xs"
               }`}
             >
-              <p>{m.text}</p>
-              {m.tokens && (
+              <p className="whitespace-pre-line">{m.text}</p>
+              {m.provider && (
                 <p className="text-[10px] font-mono text-slate-400 mt-1.5">
-                  Read-only tool query • {m.tokens} tokens • $0.0002
+                  {m.provider === "groq"
+                    ? `Live Groq RAG (${m.model || "llama-3.3-70b"}) • ${m.tokens ?? 0} tokens`
+                    : "Deterministic Read-Only Fallback • 0 LLM tokens"}
                 </p>
               )}
             </div>
