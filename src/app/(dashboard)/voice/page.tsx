@@ -29,6 +29,7 @@ export default async function VoicePage() {
         estimatedValue: m.estimatedValue,
         isTcpaOptedOut: m.isTcpaOptedOut,
         status: m.status,
+        appointmentAt: m.appointmentAt || null,
       }))}
     />
   );

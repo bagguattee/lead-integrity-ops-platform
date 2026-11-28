@@ -72,6 +72,7 @@ interface VoiceClientProps {
     estimatedValue: number;
     isTcpaOptedOut: boolean;
     status: string;
+    appointmentAt?: string | null;
   }[];
 }
 
